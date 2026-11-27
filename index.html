@@ -1,0 +1,175 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>CoDiR: Confidence-Guided Diffusion Refinement for Semi-Supervised Histopathology Segmentation</title>
+  <meta name="description" content="CoDiR refines only the low-confidence regions of teacher pseudo-labels with a conditional diffusion model, reaching the best result on 7 of 8 GlaS/CRAG metrics." />
+  <meta property="og:title" content="CoDiR — Confidence-Guided Diffusion Refinement (MICCAI 2026)" />
+  <meta property="og:description" content="Semi-supervised histopathology segmentation with confidence-gated diffusion refinement of pseudo-labels." />
+  <meta property="og:image" content="static/images/fig1_overview.png" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@500;600&family=Space+Grotesk:wght@600;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="static/css/style.css" />
+</head>
+<body>
+  <nav class="topnav">
+    <a class="brand" href="#top">CoDiR</a>
+    <div class="nav-links">
+      <a href="#method">Method</a>
+      <a href="#demo">Interactive</a>
+      <a href="#results">Results</a>
+      <a href="#ablation">Ablations</a>
+      <a href="#citation">Cite</a>
+      <button id="theme-toggle" class="icon-btn" aria-label="Toggle light/dark theme">◐</button>
+    </div>
+  </nav>
+
+  <!-- ============================ HERO ============================ -->
+  <header class="hero" id="top">
+    <span class="venue">MICCAI 2026</span>
+    <h1>CoDiR: Confidence-Guided Diffusion Refinement<br/>for Semi-Supervised Histopathology Segmentation</h1>
+    <p class="authors">
+      <span>Hoai Nhan Pham<sup>1*</sup></span>
+      <span>Dang-Nguyen Bui<sup>2*</sup></span>
+      <span>Le-Van Thai<sup>1*</sup></span>
+      <span>Thanh-Hiep Vo<sup>3</sup></span>
+      <span>Lan Anh Dinh Thi<sup>4</sup></span>
+      <span>Tien Dat Nguyen<sup>1</sup></span>
+      <span>Duy-Dong Nguyen<sup>1</sup></span>
+      <span>Ngoc Lam Quang Bui<sup>5</sup></span>
+      <span>Tam Tran<sup>6✉</sup></span>
+      <span>Zhi Huang<sup>7✉</sup></span>
+    </p>
+    <!-- TODO: replace with the real affiliations 1–7 -->
+    <p class="affils"><sup>*</sup>Equal contribution &nbsp;·&nbsp; <sup>✉</sup>Corresponding authors</p>
+    <div class="links">
+      <a class="pill" href="static/paper/CoDiR.pdf" target="_blank" rel="noopener">📄 Paper</a>
+      <a class="pill" href="https://github.com/vongla345/codir" target="_blank" rel="noopener">⌨ Code</a>
+      <a class="pill" href="interactive.html">⚙ Interactive</a>
+      <a class="pill" href="#citation">❝ BibTeX</a>
+      <!-- TODO: <a class="pill" href="https://arxiv.org/abs/XXXX.XXXXX">arXiv</a> -->
+    </div>
+  </header>
+
+  <main>
+    <!-- ============================ TL;DR ============================ -->
+    <section class="card tldr">
+      <h2>TL;DR</h2>
+      <p>Teacher pseudo-labels in semi-supervised histopathology segmentation fail exactly where it matters: thin gland bridges and ambiguous boundaries. Training on them reinforces the error (<em>confirmation bias</em>). <strong>CoDiR sends only the low-confidence pixels</strong> through a small conditional diffusion model to repair them, keeps the confident teacher predictions as they are, and weights every pixel by how well teacher and diffusion agree.</p>
+      <div class="stats">
+        <div><b>7 / 8</b><span>best metrics on GlaS &amp; CRAG</span></div>
+        <div><b>+2.94</b><span>mJaccard over prior SOTA<br/>(CRAG, 10% labels)</span></div>
+        <div><b>+7.14</b><span>mDice over the Mean Teacher<br/>baseline (GlaS, 10%)</span></div>
+        <div><b>0</b><span>extra inference cost —<br/>only the student runs</span></div>
+      </div>
+    </section>
+
+    <!-- ============================ ABSTRACT (summary) ============================ -->
+    <section class="card">
+      <h2>Overview</h2>
+      <!-- TODO: replace this summary with the official abstract from the camera-ready paper -->
+      <p>Pixel-level annotation of histopathology images is costly and needs expert pathologists. Semi-supervised teacher–student frameworks reduce that cost, but inaccurate pseudo-labels introduce structural and boundary errors that get reinforced during training. Pathology foundation models such as UNI give strong features. Our earlier UniSemAlign used them to align features, which constrains pseudo-labels only <em>indirectly</em>.</p>
+      <p>CoDiR acts on the <em>mask itself</em>. A frozen UNI encoder and a DeepLabV3-style decoder form a Mean Teacher segmenter. A low-capacity conditional diffusion model, trained on the labeled subset in the same loop, learns a structural prior over plausible gland shapes. During training, only pixels whose teacher confidence falls below an adaptive threshold are partially noised (SDEdit-style) and denoised by this prior, then fused back with the reliable teacher predictions. On GlaS and CRAG, CoDiR is best on seven of eight benchmark metrics.</p>
+    </section>
+
+    <!-- ============================ METHOD ============================ -->
+    <section class="card" id="method">
+      <h2>Method</h2>
+      <figure class="figure zoomable">
+        <img src="static/images/fig1_overview.png" alt="CoDiR architecture overview" loading="lazy" />
+        <figcaption><b>Fig. 1.</b> The student is trained with labeled supervision and with pseudo-labels from an EMA teacher. The diffusion model is trained on labeled masks in the same loop and refines low-confidence regions of the teacher pseudo-masks. The refined output is then fused with high-confidence teacher predictions to form the final pseudo-label <i>y<sub>r</sub></i>. <span class="hint">Click to enlarge.</span></figcaption>
+      </figure>
+
+      <ol class="steps">
+        <li><span class="k">01</span><div><h3>Teacher prediction</h3><p>The EMA teacher predicts a soft pseudo-mask <i>ŷ</i> for an unlabeled image <i>I<sub>u</sub></i>.</p></div></li>
+        <li><span class="k">02</span><div><h3>Confidence gate</h3><p><span class="math">c = max(p, 1−p)</span>, <span class="math">m = 𝟙(c &lt; τ)</span>. τ is an EMA of batch confidence (FreeMatch-style), clamped to [0.60, 0.75].</p></div></li>
+        <li><span class="k">03</span><div><h3>Partial noising + denoising</h3><p>The mask is noised to <span class="math">α<sub>n</sub> = 0.2</span> of <span class="math">T = 100</span> steps, then a mini-UNet runs <i>K</i> reverse DDPM steps conditioned on <i>I<sub>u</sub></i>: <span class="math">y<sub>diff</sub> = Denoise<sub>K</sub>(ỹ<sub>α</sub>; I<sub>u</sub>, θ)</span>.</p></div></li>
+        <li><span class="k">04</span><div><h3>Confidence-guided fusion</h3><p><span class="math">y<sub>r</sub> = m ⊙ y<sub>diff</sub> + (1 − m) ⊙ ŷ</span>. Only uncertain pixels change; reliable structure is never corrupted.</p></div></li>
+        <li><span class="k">05</span><div><h3>Confidence weighting</h3><p><span class="math">w = c<sub>teacher</sub> · c<sub>diff</sub><sup>eff</sup></span>. Pixels where teacher and diffusion agree weigh more in the unsupervised loss.</p></div></li>
+      </ol>
+
+      <div class="eq">
+        <div class="eq-title">Training objective</div>
+        <div class="math">𝓛 = ½ (𝓛<sub>sup</sub> + 𝓛<sub>unsup</sub>)</div>
+        <div class="math">𝓛<sub>sup</sub> = λ<sub>1</sub>𝓛<sub>CE</sub> + λ<sub>2</sub>𝓛<sub>Dice</sub> + λ<sub>3</sub>𝓛<sub>clDice</sub> + λ<sub>4</sub>𝓛<sub>Boundary</sub></div>
+        <div class="math">𝓛<sub>unsup</sub> = λ<sub>u</sub> 𝔼[ w · (𝓛<sub>BCE</sub> + 𝓛<sub>Dice</sub>)(ŷ<sup>w</sup><sub>u</sub>, y<sub>r</sub>) ] + λ<sub>c</sub> (𝓛<sub>BCE</sub> + 𝓛<sub>Dice</sub>)(ŷ<sup>s</sup><sub>u</sub>, ŷ<sup>w</sup><sub>u</sub>)</div>
+        <div class="eq-note">λ<sub>1</sub> = λ<sub>2</sub> = 1.0 · λ<sub>3</sub> = λ<sub>4</sub> = 0.5 · λ<sub>u</sub> = λ<sub>c</sub> = 0.25</div>
+      </div>
+    </section>
+
+    <!-- ============================ INTERACTIVE ============================ -->
+    <section class="card" id="demo">
+      <div class="sec-head">
+        <h2>Interactive pipeline explainer</h2>
+        <a class="pill small" href="interactive.html" target="_blank" rel="noopener">Open full screen ↗</a>
+      </div>
+      <p class="muted">Click any of the 12 assemblies, drag τ, α<sub>n</sub> and <i>K</i>, and follow one pseudo-label from teacher output to refined mask.</p>
+      <div class="iframe-wrap">
+        <iframe src="interactive.html" title="CoDiR interactive explainer" loading="lazy"></iframe>
+      </div>
+    </section>
+
+    <!-- ============================ RESULTS ============================ -->
+    <section class="card" id="results">
+      <div class="sec-head">
+        <h2>Comparison with the state of the art</h2>
+        <div class="tabs" role="tablist" data-target="sota">
+          <button class="tab active" data-split="10">10% labels</button>
+          <button class="tab" data-split="20">20% labels</button>
+        </div>
+      </div>
+      <div class="table-wrap"><table class="results" id="sota-table"></table></div>
+      <p class="muted small-note"><b>Bold</b> = best, <u>underline</u> = second best among semi-supervised methods. Fully-supervised (100% labels): GlaS 89.59 / 81.84, CRAG 92.68 / 86.36. Baselines from UniSemAlign, same protocol.</p>
+
+      <h3 class="sub">Qualitative comparison (10% labels)</h3>
+      <figure class="figure zoomable">
+        <img src="static/images/fig2_qualitative.png" alt="Predicted masks compared with baselines on GlaS and CRAG" loading="lazy" />
+        <figcaption><b>Fig. 2.</b> GlaS (top three rows) and CRAG (bottom three). Pink boxes mark where methods diverge most. CoDiR keeps narrow structures intact and produces fewer spurious blobs. <span class="hint">Click to enlarge.</span></figcaption>
+      </figure>
+    </section>
+
+    <!-- ============================ ABLATIONS ============================ -->
+    <section class="card" id="ablation">
+      <div class="sec-head">
+        <h2>Ablations <span class="muted">· GlaS, 10% labels, mean ± std over 3 seeds</span></h2>
+        <div class="tabs" role="tablist" data-target="ablation">
+          <button class="tab active" data-ab="modules">Modules</button>
+          <button class="tab" data-ab="encoder">Encoder</button>
+          <button class="tab" data-ab="tau">τ<sub>max</sub></button>
+          <button class="tab" data-ab="alpha">α<sub>n</sub></button>
+          <button class="tab" data-ab="ema">EMA d</button>
+        </div>
+      </div>
+      <div id="ablation-chart" class="bars" aria-live="polite"></div>
+      <p id="ablation-note" class="muted small-note"></p>
+    </section>
+
+    <!-- ============================ CITATION ============================ -->
+    <section class="card" id="citation">
+      <div class="sec-head">
+        <h2>Citation</h2>
+        <button id="copy-bib" class="pill small">Copy</button>
+      </div>
+<pre id="bibtex">@inproceedings{pham2026codir,
+  title     = {CoDiR: Confidence-Guided Diffusion Refinement for Semi-Supervised Histopathology Segmentation},
+  author    = {Pham, Hoai Nhan and Bui, Dang-Nguyen and Thai, Le-Van and Vo, Thanh-Hiep and Dinh Thi, Lan Anh and Nguyen, Tien Dat and Nguyen, Duy-Dong and Bui, Ngoc Lam Quang and Tran, Tam and Huang, Zhi},
+  booktitle = {Medical Image Computing and Computer Assisted Intervention (MICCAI)},
+  year      = {2026}
+}</pre>
+    </section>
+  </main>
+
+  <footer class="footer">
+    <span>CoDiR · MICCAI 2026 · <a href="https://github.com/vongla345/codir">github.com/vongla345/codir</a></span>
+    <span>Builds on UNI, Mean Teacher, DDPM, SDEdit and FreeMatch.</span>
+  </footer>
+
+  <div id="lightbox" class="lightbox" role="dialog" aria-label="Enlarged figure" hidden>
+    <img alt="" />
+  </div>
+
+  <script src="static/js/main.js"></script>
+</body>
+</html>

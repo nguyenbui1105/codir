@@ -1,0 +1,54 @@
+cff-version: 1.2.0
+message: "If you use CoDiR in your research, please cite the paper below."
+title: "CoDiR: Confidence-Guided Diffusion Refinement for Semi-Supervised Histopathology Segmentation"
+type: software
+license: MIT
+repository-code: "https://github.com/vongla345/codir"
+url: "https://vongla345.github.io/codir/"
+authors:
+  - given-names: Hoai Nhan
+    family-names: Pham
+  - given-names: Dang-Nguyen
+    family-names: Bui
+  - given-names: Le-Van
+    family-names: Thai
+  - given-names: Thanh-Hiep
+    family-names: Vo
+  - given-names: Lan Anh
+    family-names: Dinh Thi
+  - given-names: Tien Dat
+    family-names: Nguyen
+  - given-names: Duy-Dong
+    family-names: Nguyen
+  - given-names: Ngoc Lam Quang
+    family-names: Bui
+  - given-names: Tam
+    family-names: Tran
+  - given-names: Zhi
+    family-names: Huang
+preferred-citation:
+  type: conference-paper
+  title: "CoDiR: Confidence-Guided Diffusion Refinement for Semi-Supervised Histopathology Segmentation"
+  collection-title: "Medical Image Computing and Computer Assisted Intervention (MICCAI)"
+  year: 2026
+  authors:
+    - given-names: Hoai Nhan
+      family-names: Pham
+    - given-names: Dang-Nguyen
+      family-names: Bui
+    - given-names: Le-Van
+      family-names: Thai
+    - given-names: Thanh-Hiep
+      family-names: Vo
+    - given-names: Lan Anh
+      family-names: Dinh Thi
+    - given-names: Tien Dat
+      family-names: Nguyen
+    - given-names: Duy-Dong
+      family-names: Nguyen
+    - given-names: Ngoc Lam Quang
+      family-names: Bui
+    - given-names: Tam
+      family-names: Tran
+    - given-names: Zhi
+      family-names: Huang

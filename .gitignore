@@ -1,0 +1,24 @@
+# OS / editor
+.DS_Store
+Thumbs.db
+desktop.ini
+.vscode/
+.idea/
+.claude/
+
+# Python (for a future code release)
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+
+# Data, checkpoints and logs (publish via Releases / Hugging Face instead)
+data/
+checkpoints/
+*.pth
+*.pt
+*.ckpt
+runs/
+wandb/
+outputs/

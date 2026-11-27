@@ -1,0 +1,3619 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>CoDiR — Anatomy of Confidence-Guided Diffusion Refinement</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@500;600;700&family=Space+Grotesk:wght@600;700&display=swap" rel="stylesheet" />
+  <style>
+    /* =========================================================================
+       1. DESIGN TOKENS — DRAFTING PAPER & PRECISION INSTRUMENT PALETTE
+       ========================================================================= */
+    :root {
+      --bg-page: #efece6;
+      --bg-card: #faf8f4;
+      --bg-panel: #f2eee5;
+      --bg-inset: #e8e3d8;
+      --border: #d6d0c4;
+      --border-strong: #b8b0a0;
+      --ink: #1c1917;
+      --ink-muted: #57534e;
+      --ink-faint: #8a847c;
+
+      --accent-brass: #b8862d;
+      --accent-brass-soft: rgba(184, 134, 45, 0.14);
+      --accent-teal: #2a7f76;
+      --accent-teal-soft: rgba(42, 127, 118, 0.13);
+      --accent-coral: #c85a3a;
+      --accent-coral-soft: rgba(200, 90, 58, 0.13);
+      --accent-blue: #3b6d9c;
+      --accent-blue-soft: rgba(59, 109, 156, 0.13);
+      --accent-magenta: #8b3a7a;
+      --accent-magenta-soft: rgba(139, 58, 122, 0.13);
+
+      --shadow-card: 0 22px 54px rgba(28, 25, 23, 0.09), 0 2px 6px rgba(28, 25, 23, 0.05);
+      --radius-lg: 14px;
+      --radius-md: 10px;
+      --radius-sm: 6px;
+
+      --font-sans: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      --font-display: "Space Grotesk", "Inter", sans-serif;
+      --font-mono: "JetBrains Mono", "SF Mono", Consolas, Menlo, monospace;
+      --font-math: "Cambria Math", "STIX Two Text", "Times New Roman", Georgia, serif;
+    }
+
+    [data-theme="dark"] {
+      --bg-page: #15171c;
+      --bg-card: #1c1f26;
+      --bg-panel: #222630;
+      --bg-inset: #161920;
+      --border: #2f3542;
+      --border-strong: #464f61;
+      --ink: #e8ecf2;
+      --ink-muted: #9aa3b2;
+      --ink-faint: #6c7585;
+
+      --accent-brass: #e0b055;
+      --accent-brass-soft: rgba(224, 176, 85, 0.18);
+      --accent-teal: #49b3a7;
+      --accent-teal-soft: rgba(73, 179, 167, 0.16);
+      --accent-coral: #e57a5b;
+      --accent-coral-soft: rgba(229, 122, 91, 0.16);
+      --accent-blue: #6ba1d4;
+      --accent-blue-soft: rgba(107, 161, 212, 0.16);
+      --accent-magenta: #c474b3;
+      --accent-magenta-soft: rgba(196, 116, 179, 0.16);
+
+      --shadow-card: 0 24px 64px rgba(0, 0, 0, 0.55), 0 2px 10px rgba(0, 0, 0, 0.35);
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    body {
+      font-family: var(--font-sans);
+      background-color: var(--bg-page);
+      color: var(--ink);
+      line-height: 1.5;
+      min-height: 100vh;
+      padding: 18px 16px 44px;
+      transition: background-color 0.25s ease, color 0.25s ease;
+      -webkit-font-smoothing: antialiased;
+    }
+
+    .page-container {
+      max-width: 1300px;
+      margin: 0 auto;
+      display: flex;
+      flex-direction: column;
+      gap: 18px;
+    }
+
+    /* =========================================================================
+       2. ZERO-DEPENDENCY PUBLICATION-GRADE MATH TYPOGRAPHY SYSTEM
+       (No Unicode combining marks, no obscure subscripts, zero tofu boxes)
+       ========================================================================= */
+    .math {
+      font-family: var(--font-math);
+      font-size: 1.08em;
+      font-weight: 500;
+      letter-spacing: 0.01em;
+      white-space: nowrap;
+      display: inline;
+      line-height: 1.25;
+    }
+
+    .math i,
+    .m-var {
+      font-style: italic;
+      font-family: var(--font-math);
+    }
+
+    .math sub,
+    .math sup {
+      font-family: var(--font-math);
+      font-size: 0.72em;
+      line-height: 0;
+      position: relative;
+      vertical-align: baseline;
+      font-style: normal;
+      font-weight: 500;
+    }
+
+    .math sub {
+      bottom: -0.26em;
+      margin-left: 0.04em;
+    }
+
+    .math sup {
+      top: -0.46em;
+      margin-left: 0.04em;
+    }
+
+    .math sub i,
+    .math sup i {
+      font-style: italic;
+    }
+
+    /* Stacked sub + sup alignment */
+    .m-subsup {
+      display: inline-flex;
+      flex-direction: column;
+      vertical-align: -0.24em;
+      line-height: 0.88;
+      margin-left: 0.05em;
+      font-size: 0.68em;
+      font-style: normal;
+    }
+
+    /* Clean Over-Accents via Inline-Block Wrappers (Hat, Tilde, Bar) */
+    .m-acc {
+      position: relative;
+      display: inline-block;
+      font-family: var(--font-math);
+      font-style: italic;
+      line-height: 1;
+      padding-top: 0.14em;
+    }
+
+    .m-hat::before {
+      content: "^";
+      position: absolute;
+      left: 53%;
+      top: -0.28em;
+      transform: translateX(-50%) scaleX(1.12);
+      font-style: normal;
+      font-weight: 600;
+      font-size: 0.84em;
+      line-height: 1;
+      pointer-events: none;
+    }
+
+    .m-tilde::before {
+      content: "~";
+      position: absolute;
+      left: 53%;
+      top: -0.32em;
+      transform: translateX(-50%) scaleX(1.06);
+      font-style: normal;
+      font-weight: 600;
+      font-size: 0.88em;
+      line-height: 1;
+      pointer-events: none;
+    }
+
+    .m-bar::before {
+      content: "";
+      position: absolute;
+      left: 0.06em;
+      right: 0.02em;
+      top: 0.04em;
+      height: 1.25px;
+      background: currentColor;
+      border-radius: 1px;
+      pointer-events: none;
+    }
+
+    /* Calligraphic L, D, A (universal italic serif styling) */
+    .m-cal {
+      font-family: Georgia, "Times New Roman", serif;
+      font-style: italic;
+      font-weight: 700;
+      letter-spacing: -0.02em;
+      padding-right: 0.06em;
+    }
+
+    /* Blackboard Bold R, E, 1 (clean double-stroke serif style, zero missing glyphs) */
+    .m-bb {
+      font-family: "Times New Roman", Georgia, serif;
+      font-style: normal;
+      font-weight: 700;
+      letter-spacing: 0.02em;
+      text-shadow: 0.045em 0 0 currentColor;
+      padding-right: 0.04em;
+    }
+
+    .m-op {
+      font-style: normal;
+      padding: 0 0.16em;
+    }
+
+    .m-num {
+      font-family: var(--font-mono);
+      font-variant-numeric: tabular-nums;
+      font-style: normal;
+      font-size: 0.92em;
+    }
+
+    /* =========================================================================
+       3. FRAMED ANATOMY CARD (HERO INSTRUMENT)
+       ========================================================================= */
+    .anatomy-card {
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-lg);
+      box-shadow: var(--shadow-card);
+      overflow: hidden;
+      transition: background-color 0.25s ease, border-color 0.25s ease;
+    }
+
+    .card-header {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px 18px;
+      padding: 13px 20px;
+      border-bottom: 1px solid var(--border);
+      background: var(--bg-card);
+    }
+
+    .header-left {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .fig-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: var(--accent-teal);
+      box-shadow: 0 0 0 3px var(--accent-teal-soft);
+      flex-shrink: 0;
+    }
+
+    .fig-code {
+      font-family: var(--font-mono);
+      font-size: 11.5px;
+      font-weight: 700;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: var(--ink);
+    }
+
+    .header-right {
+      display: flex;
+      flex-direction: column;
+      align-items: flex-end;
+      text-align: right;
+    }
+
+    .paper-title {
+      font-family: var(--font-display);
+      font-size: 15px;
+      font-weight: 700;
+      letter-spacing: -0.015em;
+      color: var(--ink);
+      line-height: 1.25;
+    }
+
+    .paper-sub {
+      font-family: var(--font-mono);
+      font-size: 10.5px;
+      color: var(--ink-muted);
+    }
+
+    /* Compact Technical Toolbar */
+    .card-toolbar {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      padding: 9px 20px;
+      border-bottom: 1px solid var(--border);
+      background: var(--bg-panel);
+    }
+
+    .toolbar-group {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 7px;
+    }
+
+    .mode-switch {
+      display: inline-flex;
+      background: var(--bg-inset);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      padding: 2px;
+      gap: 2px;
+    }
+
+    .mode-btn {
+      font-family: var(--font-mono);
+      font-size: 10.5px;
+      font-weight: 600;
+      padding: 5px 10px;
+      border: none;
+      border-radius: 4px;
+      background: transparent;
+      color: var(--ink-muted);
+      cursor: pointer;
+      transition: all 0.15s ease;
+    }
+
+    .mode-btn.active {
+      background: var(--bg-card);
+      color: var(--ink);
+      box-shadow: 0 1px 3px rgba(0, 0, 0, 0.12);
+    }
+
+    .btn {
+      font-family: var(--font-mono);
+      font-size: 10.5px;
+      font-weight: 600;
+      color: var(--ink);
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      padding: 5px 10px;
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      transition: all 0.15s ease;
+      user-select: none;
+    }
+
+    .btn:hover {
+      border-color: var(--border-strong);
+      background: var(--bg-inset);
+    }
+
+    .btn.active {
+      background: var(--ink);
+      color: var(--bg-card);
+      border-color: var(--ink);
+    }
+
+    .btn.brass-active {
+      background: var(--accent-brass);
+      color: #ffffff;
+      border-color: var(--accent-brass);
+    }
+
+    /* Main Isometric Canvas + Pixel-Aligned SVG Overlay Stage */
+    .iso-stage {
+      position: relative;
+      width: 100%;
+      aspect-ratio: 1200 / 565;
+      min-height: 310px;
+      max-height: 630px;
+      background: radial-gradient(ellipse at 50% 44%, var(--bg-card) 0%, var(--bg-panel) 100%);
+      overflow: hidden;
+    }
+
+    [data-theme="dark"] .iso-stage {
+      background:
+        radial-gradient(ellipse at 50% 44%, rgba(42, 48, 62, 0.65) 0%, rgba(21, 23, 28, 0.98) 100%),
+        repeating-linear-gradient(0deg, rgba(107, 161, 212, 0.04) 0 1px, transparent 1px 28px),
+        repeating-linear-gradient(90deg, rgba(107, 161, 212, 0.04) 0 1px, transparent 1px 28px);
+    }
+
+    #bench-canvas {
+      width: 100%;
+      height: 100%;
+      display: block;
+      cursor: default;
+      touch-action: manipulation;
+    }
+
+    #overlay-svg {
+      position: absolute;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+      pointer-events: none;
+      z-index: 6;
+    }
+
+    .svg-pin-group {
+      pointer-events: auto;
+      cursor: pointer;
+    }
+
+    .svg-pin-group circle {
+      transition: transform 0.14s ease, fill 0.14s ease;
+      transform-box: fill-box;
+      transform-origin: center;
+    }
+
+    .svg-pin-group:hover circle.pin-bg {
+      transform: scale(1.18);
+    }
+
+    /* Sleek Floating Hover Pill */
+    .hover-pill {
+      position: absolute;
+      pointer-events: none;
+      z-index: 14;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      padding: 5px 11px;
+      border-radius: 999px;
+      background: rgba(24, 24, 27, 0.94);
+      color: #faf8f4;
+      border: 1px solid rgba(224, 176, 85, 0.45);
+      font-family: var(--font-mono);
+      font-size: 10.5px;
+      font-weight: 600;
+      white-space: nowrap;
+      box-shadow: 0 8px 22px rgba(0, 0, 0, 0.25);
+      opacity: 0;
+      transform: translateY(4px);
+      transition: opacity 0.11s ease, transform 0.11s ease;
+    }
+
+    .hover-pill.visible {
+      opacity: 1;
+      transform: translateY(0);
+    }
+
+    .hover-pill .hp-code {
+      color: #f0c66e;
+      font-weight: 700;
+    }
+
+    .hover-pill .hp-cta {
+      color: #a8a29e;
+      font-weight: 500;
+    }
+
+    /* Precision Technical Annotation Callout Card */
+    .callout-card {
+      position: absolute;
+      z-index: 16;
+      width: 376px;
+      max-width: calc(100% - 24px);
+      background: var(--bg-card);
+      border: 1.5px solid var(--border-strong);
+      border-radius: 11px;
+      box-shadow: 0 20px 48px rgba(18, 22, 26, 0.24), 0 2px 8px rgba(18, 22, 26, 0.1);
+      padding: 13px 15px;
+      display: none;
+      flex-direction: column;
+      gap: 8px;
+      transition: left 0.18s cubic-bezier(0.22, 1, 0.36, 1), top 0.18s cubic-bezier(0.22, 1, 0.36, 1);
+    }
+
+    .callout-card.open {
+      display: flex;
+      animation: calloutIn 0.16s ease-out;
+    }
+
+    @keyframes calloutIn {
+      from { opacity: 0; transform: scale(0.96); }
+      to { opacity: 1; transform: scale(1); }
+    }
+
+    .cc-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      padding-bottom: 7px;
+      border-bottom: 1px solid var(--border);
+    }
+
+    .cc-head-left {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      flex-wrap: wrap;
+    }
+
+    .cc-code {
+      font-family: var(--font-mono);
+      font-size: 11px;
+      font-weight: 700;
+      color: var(--accent-brass);
+      background: var(--accent-brass-soft);
+      border: 1px solid var(--accent-brass);
+      border-radius: 4px;
+      padding: 1px 6px;
+    }
+
+    .cc-status {
+      font-family: var(--font-mono);
+      font-size: 9.5px;
+      font-weight: 700;
+      padding: 2px 6px;
+      border-radius: 4px;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+    }
+
+    .cc-status.active { background: var(--accent-teal-soft); color: var(--accent-teal); border: 1px solid var(--accent-teal); }
+    .cc-status.frozen { background: var(--accent-blue-soft); color: var(--accent-blue); border: 1px solid var(--accent-blue); }
+    .cc-status.trainable { background: var(--accent-brass-soft); color: var(--accent-brass); border: 1px solid var(--accent-brass); }
+    .cc-status.ema { background: var(--accent-magenta-soft); color: var(--accent-magenta); border: 1px solid var(--accent-magenta); }
+    .cc-status.bypassed { background: var(--accent-coral-soft); color: var(--accent-coral); border: 1px solid var(--accent-coral); }
+
+    .cc-close {
+      border: 1px solid var(--border);
+      background: var(--bg-panel);
+      color: var(--ink-muted);
+      width: 24px;
+      height: 24px;
+      border-radius: 5px;
+      font-family: var(--font-mono);
+      font-size: 14px;
+      line-height: 1;
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      flex-shrink: 0;
+    }
+
+    .cc-close:hover {
+      background: var(--ink);
+      color: var(--bg-card);
+      border-color: var(--ink);
+    }
+
+    .cc-title {
+      font-family: var(--font-display);
+      font-size: 14px;
+      font-weight: 700;
+      color: var(--ink);
+      line-height: 1.25;
+    }
+
+    .cc-sub {
+      font-family: var(--font-mono);
+      font-size: 10px;
+      color: var(--ink-muted);
+      margin-top: -5px;
+    }
+
+    .cc-bypass-box {
+      display: none;
+      font-size: 11px;
+      line-height: 1.44;
+      color: var(--accent-coral);
+      background: var(--accent-coral-soft);
+      border: 1px solid var(--accent-coral);
+      border-radius: 6px;
+      padding: 6px 8px;
+    }
+
+    .cc-bypass-box.show {
+      display: block;
+    }
+
+    .cc-flow {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+
+    .cc-row {
+      display: grid;
+      grid-template-columns: 64px 1fr;
+      gap: 7px;
+      font-size: 11.3px;
+      line-height: 1.48;
+      color: var(--ink);
+    }
+
+    .cc-k {
+      font-family: var(--font-mono);
+      font-size: 9.2px;
+      font-weight: 700;
+      text-transform: uppercase;
+      color: var(--accent-teal);
+      padding-top: 2px;
+      letter-spacing: 0.03em;
+    }
+
+    .cc-k.op { color: var(--accent-brass); }
+    .cc-k.out { color: var(--accent-coral); }
+
+    .cc-eq {
+      background: var(--bg-inset);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 7px 10px;
+      color: var(--ink);
+      overflow-x: auto;
+      font-size: 12px;
+      line-height: 1.5;
+    }
+
+    .cc-live {
+      font-family: var(--font-mono);
+      font-variant-numeric: tabular-nums;
+      font-size: 10.5px;
+      color: var(--accent-teal);
+      background: var(--accent-teal-soft);
+      border-radius: 6px;
+      padding: 5px 9px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+    }
+
+    .cc-footer {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 6px;
+      padding-top: 7px;
+      border-top: 1px solid var(--border);
+    }
+
+    .cc-nav-btn {
+      font-family: var(--font-mono);
+      font-size: 10px;
+      font-weight: 600;
+      padding: 5px 8px;
+      border-radius: 5px;
+      border: 1px solid var(--border);
+      background: var(--bg-panel);
+      color: var(--ink);
+      cursor: pointer;
+      transition: all 0.12s ease;
+    }
+
+    .cc-nav-btn:hover {
+      background: var(--ink);
+      color: var(--bg-card);
+      border-color: var(--ink);
+    }
+
+    .cc-counter {
+      font-family: var(--font-mono);
+      font-size: 10.5px;
+      font-weight: 700;
+      color: var(--ink-muted);
+      font-variant-numeric: tabular-nums;
+    }
+
+    /* Parts Quick-Select Index Bar (12 Clickable Chips directly under Canvas) */
+    .parts-index-bar {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 6px;
+      padding: 10px 20px;
+      border-top: 1px solid var(--border);
+      background: var(--bg-card);
+    }
+
+    .parts-index-label {
+      font-family: var(--font-mono);
+      font-size: 10px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      color: var(--ink-muted);
+      margin-right: 4px;
+    }
+
+    .part-chip {
+      font-family: var(--font-mono);
+      font-size: 10px;
+      font-weight: 600;
+      padding: 4px 8px;
+      border-radius: 5px;
+      border: 1px solid var(--border);
+      background: var(--bg-panel);
+      color: var(--ink-muted);
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      transition: all 0.14s ease;
+    }
+
+    .part-chip .chip-id {
+      color: var(--accent-brass);
+      font-weight: 700;
+    }
+
+    .part-chip:hover {
+      border-color: var(--accent-brass);
+      color: var(--ink);
+      background: var(--accent-brass-soft);
+    }
+
+    .part-chip.active {
+      background: var(--ink);
+      color: var(--bg-card);
+      border-color: var(--ink);
+    }
+
+    .part-chip.active .chip-id {
+      color: #f0c66e;
+    }
+
+    .part-chip.bypassed {
+      opacity: 0.55;
+      border-style: dashed;
+    }
+
+    /* Bottom Telemetry Bar inside Framed Card */
+    .card-bottombar {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px 16px;
+      padding: 10px 20px;
+      border-top: 1px solid var(--border);
+      background: var(--bg-panel);
+    }
+
+    .hint-text {
+      font-family: var(--font-mono);
+      font-size: 10.5px;
+      color: var(--ink-muted);
+    }
+
+    .telemetry-strip {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 14px;
+      font-family: var(--font-mono);
+      font-variant-numeric: tabular-nums;
+      font-size: 11px;
+    }
+
+    .tele-item {
+      display: inline-flex;
+      align-items: baseline;
+      gap: 5px;
+    }
+
+    .tele-k {
+      color: var(--ink-muted);
+      font-size: 11px;
+    }
+
+    .tele-v {
+      font-weight: 700;
+      color: var(--ink);
+    }
+
+    .tele-v.teal { color: var(--accent-teal); }
+    .tele-v.coral { color: var(--accent-coral); }
+    .tele-v.brass { color: var(--accent-brass); }
+
+    /* =========================================================================
+       4. COMPACT INTERACTIVE CONTROL STRIP
+       ========================================================================= */
+    .control-strip-card {
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-lg);
+      box-shadow: var(--shadow-card);
+      padding: 15px 20px;
+      display: grid;
+      grid-template-columns: 1.15fr 1fr 1fr 1fr;
+      gap: 14px;
+      align-items: stretch;
+    }
+
+    .ctrl-box {
+      background: var(--bg-panel);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-md);
+      padding: 10px 12px;
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+      gap: 7px;
+    }
+
+    .ctrl-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 6px;
+    }
+
+    .ctrl-label {
+      font-family: var(--font-mono);
+      font-size: 10.5px;
+      font-weight: 700;
+      color: var(--ink);
+    }
+
+    .ctrl-val {
+      font-family: var(--font-mono);
+      font-variant-numeric: tabular-nums;
+      font-size: 11.5px;
+      font-weight: 700;
+      color: var(--accent-teal);
+    }
+
+    .ctrl-note {
+      font-size: 10.6px;
+      color: var(--ink-muted);
+      line-height: 1.42;
+    }
+
+    input[type="range"] {
+      width: 100%;
+      accent-color: var(--accent-teal);
+      cursor: pointer;
+      height: 6px;
+    }
+
+    .dataset-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 5px;
+    }
+
+    .ds-btn {
+      font-family: var(--font-mono);
+      font-size: 10.5px;
+      font-weight: 600;
+      padding: 5px 4px;
+      border-radius: 5px;
+      border: 1px solid var(--border);
+      background: var(--bg-card);
+      color: var(--ink-muted);
+      cursor: pointer;
+      text-align: center;
+      transition: all 0.14s ease;
+    }
+
+    .ds-btn:hover {
+      border-color: var(--border-strong);
+      color: var(--ink);
+    }
+
+    .ds-btn.active {
+      background: var(--ink);
+      color: var(--bg-card);
+      border-color: var(--ink);
+    }
+
+    .mini-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 6px;
+    }
+
+    .check-label {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      font-family: var(--font-mono);
+      font-size: 10px;
+      color: var(--ink-muted);
+      cursor: pointer;
+      user-select: none;
+    }
+
+    .check-label input {
+      accent-color: var(--accent-teal);
+      cursor: pointer;
+    }
+
+    /* =========================================================================
+       5. LIVE 5-STAGE INPUT -> OUTPUT OPTICAL FILMSTRIP
+       ========================================================================= */
+    .section-card {
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-lg);
+      box-shadow: var(--shadow-card);
+      padding: 17px 20px;
+      transition: background-color 0.25s ease, border-color 0.25s ease;
+    }
+
+    .section-header {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: baseline;
+      justify-content: space-between;
+      gap: 10px;
+      margin-bottom: 13px;
+    }
+
+    .section-title {
+      font-family: var(--font-display);
+      font-size: 15px;
+      font-weight: 700;
+      letter-spacing: -0.01em;
+      color: var(--ink);
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+
+    .section-tag {
+      font-family: var(--font-mono);
+      font-size: 10px;
+      font-weight: 700;
+      padding: 2px 7px;
+      border-radius: 4px;
+      background: var(--bg-panel);
+      border: 1px solid var(--border);
+      color: var(--ink-muted);
+    }
+
+    .section-sub {
+      font-family: var(--font-mono);
+      font-size: 10.5px;
+      color: var(--ink-muted);
+    }
+
+    .filmstrip-grid {
+      display: grid;
+      grid-template-columns: 1fr 18px 1fr 18px 1fr 18px 1fr 18px 1fr;
+      align-items: stretch;
+      gap: 6px;
+    }
+
+    .film-chevron {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: var(--ink-faint);
+      font-family: var(--font-mono);
+      font-size: 15px;
+      font-weight: 700;
+      user-select: none;
+    }
+
+    .film-cell {
+      background: var(--bg-panel);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-md);
+      padding: 9px;
+      display: flex;
+      flex-direction: column;
+      gap: 7px;
+      cursor: pointer;
+      transition: border-color 0.15s ease, box-shadow 0.15s ease;
+    }
+
+    .film-cell:hover {
+      border-color: var(--border-strong);
+    }
+
+    .film-cell.active {
+      border-color: var(--accent-brass);
+      box-shadow: 0 0 0 2px var(--accent-brass-soft);
+    }
+
+    .film-top {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 4px;
+      font-family: var(--font-mono);
+      font-size: 10.5px;
+      font-weight: 700;
+      color: var(--ink);
+    }
+
+    .film-num {
+      font-size: 9.5px;
+      padding: 1px 5px;
+      border-radius: 3px;
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      color: var(--accent-brass);
+    }
+
+    .viewport-box {
+      position: relative;
+      width: 100%;
+      aspect-ratio: 1 / 1;
+      border-radius: 6px;
+      overflow: hidden;
+      border: 1px solid var(--border-strong);
+      background: #14171a;
+    }
+
+    .viewport-box canvas {
+      width: 100%;
+      height: 100%;
+      display: block;
+    }
+
+    .film-caption {
+      font-size: 11px;
+      color: var(--ink-muted);
+      line-height: 1.42;
+    }
+
+    .compare-line {
+      position: absolute;
+      top: 0;
+      bottom: 0;
+      width: 2px;
+      background: #ffffff;
+      box-shadow: 0 0 6px rgba(0, 0, 0, 0.75);
+      pointer-events: none;
+      z-index: 3;
+    }
+
+    .compare-knob {
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      width: 20px;
+      height: 20px;
+      border-radius: 50%;
+      background: #ffffff;
+      color: #1c1917;
+      border: 1.5px solid #1c1917;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 9px;
+      font-weight: 800;
+    }
+
+    .compare-tag {
+      position: absolute;
+      top: 5px;
+      font-family: var(--font-mono);
+      font-size: 8.5px;
+      font-weight: 700;
+      padding: 1px 5px;
+      border-radius: 3px;
+      background: rgba(20, 20, 20, 0.84);
+      color: #ffffff;
+      pointer-events: none;
+      z-index: 2;
+    }
+
+    .compare-tag.left { left: 5px; }
+    .compare-tag.right { right: 5px; }
+
+    .compare-input {
+      position: absolute;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+      opacity: 0;
+      cursor: ew-resize;
+      z-index: 4;
+      margin: 0;
+    }
+
+    .vp5-mini-tabs {
+      display: flex;
+      gap: 3px;
+    }
+
+    .vp5-tab {
+      flex: 1;
+      font-family: var(--font-mono);
+      font-size: 9.5px;
+      font-weight: 600;
+      padding: 3px 4px;
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      background: var(--bg-card);
+      color: var(--ink-muted);
+      cursor: pointer;
+    }
+
+    .vp5-tab.active {
+      background: var(--ink);
+      color: var(--bg-card);
+      border-color: var(--ink);
+    }
+
+    /* =========================================================================
+       6. MICCAI PAPER BENCHMARK & ABLATION TABLES + FOOTER
+       ========================================================================= */
+    .ref-tabs {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+    }
+
+    .ref-tab {
+      font-family: var(--font-mono);
+      font-size: 10.5px;
+      font-weight: 600;
+      padding: 5px 11px;
+      border-radius: 5px;
+      border: 1px solid var(--border);
+      background: var(--bg-panel);
+      color: var(--ink-muted);
+      cursor: pointer;
+    }
+
+    .ref-tab.active {
+      background: var(--ink);
+      color: var(--bg-card);
+      border-color: var(--ink);
+    }
+
+    .ref-panel {
+      display: none;
+    }
+
+    .ref-panel.active {
+      display: block;
+    }
+
+    .bench-table {
+      width: 100%;
+      border-collapse: collapse;
+      font-family: var(--font-mono);
+      font-size: 11.5px;
+      font-variant-numeric: tabular-nums;
+    }
+
+    .bench-table th,
+    .bench-table td {
+      padding: 7px 10px;
+      border-bottom: 1px solid var(--border);
+      text-align: right;
+    }
+
+    .bench-table th:first-child,
+    .bench-table td:first-child {
+      text-align: left;
+    }
+
+    .bench-table th {
+      font-size: 10px;
+      text-transform: uppercase;
+      color: var(--ink-muted);
+      background: var(--bg-panel);
+    }
+
+    .bench-table tr.row-ours {
+      background: var(--accent-teal-soft);
+      font-weight: 700;
+    }
+
+    .bench-table tr.row-ours td:first-child {
+      color: var(--accent-teal);
+    }
+
+    .ablation-grid {
+      display: grid;
+      grid-template-columns: 1.12fr 1fr;
+      gap: 18px;
+      align-items: start;
+    }
+
+    .ab-bar-group {
+      display: flex;
+      flex-direction: column;
+      gap: 11px;
+    }
+
+    .ab-row-head {
+      display: flex;
+      justify-content: space-between;
+      gap: 8px;
+      font-family: var(--font-mono);
+      font-size: 11px;
+      margin-bottom: 4px;
+    }
+
+    .ab-track {
+      height: 9px;
+      background: var(--bg-inset);
+      border: 1px solid var(--border);
+      border-radius: 99px;
+      overflow: hidden;
+    }
+
+    .ab-fill {
+      height: 100%;
+      border-radius: 99px;
+      background: var(--ink-muted);
+    }
+
+    .ab-fill.coral { background: var(--accent-coral); }
+    .ab-fill.teal { background: var(--accent-teal); }
+
+    .eq-box {
+      background: var(--bg-inset);
+      border: 1px solid var(--border-strong);
+      border-radius: 8px;
+      padding: 12px 14px;
+      color: var(--ink);
+      font-size: 12.5px;
+      line-height: 1.9;
+      overflow-x: auto;
+    }
+
+    .eq-box-title {
+      font-family: var(--font-mono);
+      font-size: 10.5px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      color: var(--ink-muted);
+      margin-bottom: 6px;
+    }
+
+    .page-footer {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px 16px;
+      padding: 4px 4px 0;
+      font-family: var(--font-mono);
+      font-size: 10.5px;
+      color: var(--ink-muted);
+    }
+
+    .page-footer a {
+      color: var(--accent-teal);
+      text-decoration: none;
+      border-bottom: 1px dashed var(--accent-teal);
+    }
+
+    .page-footer a:hover {
+      color: var(--ink);
+      border-bottom-color: var(--ink);
+    }
+
+    /* =========================================================================
+       7. RESPONSIVE BREAKPOINTS
+       ========================================================================= */
+    @media (max-width: 1120px) {
+      .control-strip-card {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+      }
+      .filmstrip-grid {
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 10px;
+      }
+      .film-chevron { display: none; }
+      .ablation-grid {
+        grid-template-columns: 1fr;
+      }
+    }
+
+    @media (max-width: 700px) {
+      body { padding: 10px 8px 34px; }
+      .card-header, .card-toolbar, .parts-index-bar, .card-bottombar, .section-card, .control-strip-card {
+        padding-left: 12px;
+        padding-right: 12px;
+      }
+      .header-right {
+        align-items: flex-start;
+        text-align: left;
+      }
+      .control-strip-card {
+        grid-template-columns: 1fr;
+      }
+      .filmstrip-grid {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+      }
+      .callout-card.open {
+        position: static;
+        width: 100%;
+        max-width: 100%;
+        border-radius: 0;
+        border-left: none;
+        border-right: none;
+        border-bottom: none;
+        box-shadow: none;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="page-container">
+    <!-- =======================================================================
+         1. FRAMED ANATOMY CARD — PIXEL-EXACT CLICKABLE 12-PART ISOMETRIC BENCH
+         ======================================================================= -->
+    <section class="anatomy-card" aria-label="CoDiR isometric optical-mechanical bench">
+      <!-- Top Framed Header -->
+      <header class="card-header">
+        <div class="header-left">
+          <span class="fig-dot"></span>
+          <span class="fig-code">Fig. 1 &mdash; CoDiR Optical-Mechanical Bench</span>
+        </div>
+        <div class="header-right">
+          <h1 class="paper-title">CoDiR: Confidence-Guided Diffusion Refinement</h1>
+          <span class="paper-sub">MICCAI &middot; Semi-Supervised Histopathology Segmentation (GlaS &amp; CRAG)</span>
+        </div>
+      </header>
+
+      <!-- Compact Technical Toolbar -->
+      <div class="card-toolbar">
+        <div class="toolbar-group">
+          <div class="mode-switch" role="group" aria-label="Operating mode">
+            <button id="mode-train" class="mode-btn active">Training Loop</button>
+            <button id="mode-infer" class="mode-btn">Inference Only</button>
+          </div>
+          <button id="btn-pins" class="btn" title="Toggle numbered pins (01-12) on the bench">&#9678; Show Pins (01&ndash;12)</button>
+          <button id="btn-tour" class="btn" title="Open guided callout inspection across all 12 assemblies">&#9998; Inspect 12 Parts</button>
+        </div>
+        <div class="toolbar-group">
+          <button id="btn-explode" class="btn" title="Toggle isometric Z-axis exploded view (Key E)">&#8862; Explode [E]</button>
+          <button id="btn-pause" class="btn" title="Pause or resume signal flow (Space)">&#10074;&#10074; Pause [Space]</button>
+          <button id="btn-theme" class="btn" title="Switch between Drafting Paper and Dark Blueprint theme">&#9680; Light / Dark</button>
+        </div>
+      </div>
+
+      <!-- Main Isometric Stage (Canvas + Pixel-Aligned SVG Leader Overlay + Callout Card) -->
+      <div class="iso-stage" id="iso-stage">
+        <canvas id="bench-canvas" aria-label="Interactive 12-part isometric optical-mechanical bench for CoDiR"></canvas>
+        <svg id="overlay-svg" viewBox="0 0 1200 565" preserveAspectRatio="xMidYMid meet" aria-hidden="true"></svg>
+
+        <!-- Cursor Hover Pill -->
+        <div id="hover-pill" class="hover-pill" aria-hidden="true"></div>
+
+        <!-- Precision Technical Callout Card -->
+        <div id="callout-card" class="callout-card" role="dialog" aria-label="Component technical specification">
+          <div class="cc-head">
+            <div class="cc-head-left">
+              <span class="cc-code" id="cc-code">01A</span>
+              <span class="cc-status active" id="cc-status">ACTIVE</span>
+            </div>
+            <button id="cc-close" class="cc-close" title="Close callout (Esc)">&times;</button>
+          </div>
+          <div class="cc-title" id="cc-title">H&amp;E Slide Tray</div>
+          <div class="cc-sub" id="cc-sub">Station 01 &middot; Input Feed Stage</div>
+          <div class="cc-bypass-box" id="cc-bypass-box"></div>
+          <div class="cc-flow">
+            <div class="cc-row"><span class="cc-k">Input</span><span id="cc-in"></span></div>
+            <div class="cc-row"><span class="cc-k op">Mechanism</span><span id="cc-op"></span></div>
+            <div class="cc-row"><span class="cc-k out">Output</span><span id="cc-out"></span></div>
+          </div>
+          <div class="cc-eq" id="cc-eq"></div>
+          <div class="cc-live">
+            <span>LIVE TELEMETRY</span>
+            <strong id="cc-live-val"></strong>
+          </div>
+          <div class="cc-footer">
+            <button id="cc-prev" class="cc-nav-btn">&larr; Prev</button>
+            <span class="cc-counter" id="cc-counter">1 / 12</span>
+            <button id="cc-next" class="cc-nav-btn">Next &rarr;</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Quick-Select 12-Part Index Strip -->
+      <div class="parts-index-bar" id="parts-index-bar" aria-label="Quick-select 12 mechanical assemblies">
+        <span class="parts-index-label">Assemblies:</span>
+      </div>
+
+      <!-- Bottom Hint & Live Telemetry Readout -->
+      <div class="card-bottombar">
+        <span class="hint-text">Click any assembly to inspect &middot; &larr;/&rarr; cycle parts &middot; E explode &middot; Space pause &middot; Esc close</span>
+        <div class="telemetry-strip">
+          <span class="tele-item">
+            <span class="tele-k"><span class="math"><span class="m-acc m-bar">c</span><sub>teacher</sub></span></span>
+            <span class="tele-v" id="tel-conf">0.842</span>
+          </span>
+          <span class="tele-item">
+            <span class="tele-k"><span class="math">&tau;</span></span>
+            <span class="tele-v brass" id="tel-tau">0.75</span>
+          </span>
+          <span class="tele-item">
+            <span class="tele-k"><span class="math">&alpha;<sub>n</sub></span></span>
+            <span class="tele-v" id="tel-alpha">0.20</span>
+          </span>
+          <span class="tele-item">
+            <span class="tele-k"><span class="math"><i>m</i> = 1</span></span>
+            <span class="tele-v coral" id="tel-m">17.8%</span>
+          </span>
+          <span class="tele-item">
+            <span class="tele-k">mDice</span>
+            <span class="tele-v teal" id="tel-dice">88.09%</span>
+          </span>
+        </div>
+      </div>
+    </section>
+
+    <!-- =======================================================================
+         2. COMPACT INTERACTIVE CONTROL STRIP
+         ======================================================================= -->
+    <section class="control-strip-card" aria-label="CoDiR interactive hyperparameter controls">
+      <!-- Dataset Selector -->
+      <div class="ctrl-box">
+        <div class="ctrl-head">
+          <span class="ctrl-label">Dataset &amp; Labeled Split (<span class="math"><span class="m-cal">D</span><sub>l</sub></span>)</span>
+          <span class="ctrl-val" id="ctrl-ds-val">GlaS 10%</span>
+        </div>
+        <div class="dataset-grid">
+          <button class="ds-btn active" data-split="glas-10">GlaS 10%</button>
+          <button class="ds-btn" data-split="glas-20">GlaS 20%</button>
+          <button class="ds-btn" data-split="crag-10">CRAG 10%</button>
+          <button class="ds-btn" data-split="crag-20">CRAG 20%</button>
+        </div>
+        <label class="check-label">
+          <input type="checkbox" id="chk-patchgrid" />
+          <span>Overlay 16&times;16 UNI ViT-L/16 patch grid</span>
+        </label>
+      </div>
+
+      <!-- Threshold tau -->
+      <div class="ctrl-box">
+        <div class="ctrl-head">
+          <span class="ctrl-label">Confidence Threshold <span class="math">&tau;</span> (Gate 03A)</span>
+          <span class="ctrl-val" id="ctrl-tau-val">0.75</span>
+        </div>
+        <input type="range" id="slider-tau" min="0.60" max="0.85" step="0.01" value="0.75" />
+        <span class="ctrl-note">FreeMatch clamps <span class="math">&tau; &isin; [0.60, 0.75]</span> (optimal <span class="math">0.75</span>). Synchronized with dial needle &amp; shutter aperture.</span>
+      </div>
+
+      <!-- Noise alpha_n -->
+      <div class="ctrl-box">
+        <div class="ctrl-head">
+          <span class="ctrl-label">SDEdit Noise Ratio <span class="math">&alpha;<sub>n</sub></span> (Valve 04A)</span>
+          <span class="ctrl-val" id="ctrl-alpha-val">0.20</span>
+        </div>
+        <input type="range" id="slider-alpha" min="0.05" max="0.60" step="0.01" value="0.20" />
+        <span class="ctrl-note" id="ctrl-alpha-note"><span class="math"><i>T</i> = 100</span> steps. <span class="math">&alpha;<sub>n</sub> = 0.20</span> is optimal (Table 5): erases pseudo-label errors while preserving gland topology.</span>
+      </div>
+
+      <!-- Reverse Denoising Progress K -->
+      <div class="ctrl-box">
+        <div class="ctrl-head">
+          <span class="ctrl-label">DDPM Reverse Denoising (<span class="math"><i>K</i></span> steps)</span>
+          <span class="ctrl-val" id="ctrl-k-val">100% (20/20)</span>
+        </div>
+        <input type="range" id="slider-k" min="0" max="100" step="1" value="100" />
+        <div class="mini-row">
+          <label class="check-label">
+            <input type="checkbox" id="chk-autocycle" />
+            <span>Auto-cycle <span class="math"><i>K</i></span> (0&rarr;100%)</span>
+          </label>
+          <button id="btn-replay-k" class="btn" style="padding:3px 7px;font-size:10px;">&#8635; Replay K</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- =======================================================================
+         3. SYNCHRONIZED 5-STEP INPUT -> OUTPUT OPTICAL FILMSTRIP
+         ======================================================================= -->
+    <section class="section-card" aria-label="Synchronized 5-step optical filmstrip from Input to Output">
+      <div class="section-header">
+        <h2 class="section-title">
+          <span>Synchronized 5-Step Optical Filmstrip (Input &rarr; Output)</span>
+          <span class="section-tag" id="film-ds-tag">GlaS &middot; 10% Labeled</span>
+        </h2>
+        <span class="section-sub">Click any viewport frame to highlight &amp; inspect its corresponding bench assembly</span>
+      </div>
+
+      <div class="filmstrip-grid">
+        <div class="film-cell" data-jump-part="01A">
+          <div class="film-top">
+            <span>1. Input H&amp;E (<span class="math"><i>I</i><sub>u</sub></span>)</span>
+            <span class="film-num">01A</span>
+          </div>
+          <div class="viewport-box"><canvas id="vp-1" width="180" height="180"></canvas></div>
+          <p class="film-caption" id="cap-1">Colorectal gland H&amp;E histology (256&times;256): purple epithelium, pink stroma, white lumen.</p>
+        </div>
+
+        <div class="film-chevron">&rsaquo;</div>
+
+        <div class="film-cell" data-jump-part="02C">
+          <div class="film-top">
+            <span>2. Teacher Soft <span class="math"><span class="m-acc m-hat">y</span></span></span>
+            <span class="film-num">02C</span>
+          </div>
+          <div class="viewport-box"><canvas id="vp-2" width="180" height="180"></canvas></div>
+          <p class="film-caption">EMA Teacher probability <span class="math"><span class="m-acc m-hat">y</span></span> with coral halo on uncertain narrow bridges &amp; spurious blobs.</p>
+        </div>
+
+        <div class="film-chevron">&rsaquo;</div>
+
+        <div class="film-cell" data-jump-part="03A">
+          <div class="film-top">
+            <span>3. Gate <span class="math"><i>m</i> = <span class="m-bb">1</span>(<i>c</i> &lt; &tau;)</span></span>
+            <span class="film-num">03A</span>
+          </div>
+          <div class="viewport-box"><canvas id="vp-3" width="180" height="180"></canvas></div>
+          <p class="film-caption">Coral pixels (<span class="math"><i>m</i> = 1</span>) receive noise <span class="math">&alpha;<sub>n</sub></span> for Diffusion; teal pixels (<span class="math"><i>m</i> = 0</span>) stay frozen.</p>
+        </div>
+
+        <div class="film-chevron">&rsaquo;</div>
+
+        <div class="film-cell" data-jump-part="04B">
+          <div class="film-top">
+            <span>4. Diffusion <span class="math"><i>y</i><sub>diff</sub></span></span>
+            <span class="film-num">04B</span>
+          </div>
+          <div class="viewport-box"><canvas id="vp-4" width="180" height="180"></canvas></div>
+          <p class="film-caption">Conditional Mini-UNet runs <span class="math"><i>K</i></span> reverse DDPM steps conditioned on <span class="math"><i>I</i><sub>u</sub></span> to restore gland geometry.</p>
+        </div>
+
+        <div class="film-chevron">&rsaquo;</div>
+
+        <div class="film-cell" data-jump-part="06A">
+          <div class="film-top">
+            <span>5. Final CoDiR <span class="math"><i>y</i><sub>r</sub></span></span>
+            <span class="film-num">06A</span>
+          </div>
+          <div class="viewport-box">
+            <canvas id="vp-5" width="180" height="180"></canvas>
+            <span class="compare-tag left" id="vp5-left-lbl">CoDiR <span class="math"><i>y</i><sub>r</sub></span></span>
+            <span class="compare-tag right" id="vp5-right-lbl">Ground Truth</span>
+            <div class="compare-line" id="vp5-line" style="left:58%">
+              <div class="compare-knob">&harr;</div>
+            </div>
+            <input type="range" id="slider-compare" class="compare-input" min="0" max="100" value="58" aria-label="Drag to compare CoDiR output" />
+          </div>
+          <div class="vp5-mini-tabs">
+            <button class="vp5-tab active" data-vp5="gt">vs GT</button>
+            <button class="vp5-tab" data-vp5="teacher">vs Teacher</button>
+            <button class="vp5-tab" data-vp5="weight">Weight <span class="math"><i>w</i></span></button>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- =======================================================================
+         4. MICCAI PAPER BENCHMARK & ABLATION TABLES (TABLE 1 & TABLE 3)
+         ======================================================================= -->
+    <section class="section-card" aria-label="MICCAI paper benchmark and ablation results">
+      <div class="section-header">
+        <h2 class="section-title">Quantitative Evaluation (MICCAI Paper Results)</h2>
+        <div class="ref-tabs">
+          <button class="ref-tab active" data-ref="t1">Table 1 &middot; SOTA Comparison (GlaS &amp; CRAG)</button>
+          <button class="ref-tab" data-ref="t3">Table 3 &middot; Incremental Ablation (GlaS 10%)</button>
+        </div>
+      </div>
+
+      <!-- Table 1 -->
+      <div class="ref-panel active" id="ref-t1" style="overflow-x:auto;">
+        <table class="bench-table">
+          <thead>
+            <tr>
+              <th>Method</th>
+              <th>GlaS 10% (mDice / mJacc)</th>
+              <th>CRAG 10% (mDice / mJacc)</th>
+              <th>GlaS 20% (mDice / mJacc)</th>
+              <th>CRAG 20% (mDice / mJacc)</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>Fully-Supervised (100% Labeled)</td>
+              <td>89.59 / 81.84</td>
+              <td>92.68 / 86.36</td>
+              <td>89.59 / 81.84</td>
+              <td>92.68 / 86.36</td>
+            </tr>
+            <tr>
+              <td>UAMT (MICCAI'19)</td>
+              <td>78.57 / 64.70</td>
+              <td>77.85 / 63.74</td>
+              <td>77.09 / 62.72</td>
+              <td>79.76 / 66.33</td>
+            </tr>
+            <tr>
+              <td>FixMatch (NeurIPS'20)</td>
+              <td>66.01 / 51.39</td>
+              <td>72.42 / 64.31</td>
+              <td>58.51 / 44.12</td>
+              <td>71.20 / 64.75</td>
+            </tr>
+            <tr>
+              <td>CPS (CVPR'21)</td>
+              <td>61.70 / 49.34</td>
+              <td>47.10 / 40.77</td>
+              <td>75.99 / 63.69</td>
+              <td>52.43 / 45.70</td>
+            </tr>
+            <tr>
+              <td>CorrMatch (CVPR'24)</td>
+              <td>85.54 / 74.74</td>
+              <td>79.93 / 66.76</td>
+              <td>86.09 / 75.59</td>
+              <td>85.35 / 74.54</td>
+            </tr>
+            <tr>
+              <td>DuSSS (AAAI'25)</td>
+              <td>75.07 / 61.46</td>
+              <td>64.25 / 49.99</td>
+              <td>79.50 / 66.80</td>
+              <td>71.13 / 57.45</td>
+            </tr>
+            <tr>
+              <td>CSDS (MICCAI-W'25)</td>
+              <td>82.89 / 71.61</td>
+              <td>79.86 / 67.81</td>
+              <td>83.50 / 72.87</td>
+              <td>81.28 / 69.67</td>
+            </tr>
+            <tr>
+              <td>UniSemAlign (CVPRW'26)</td>
+              <td><strong>88.15</strong> / 78.82</td>
+              <td>88.57 / 79.52</td>
+              <td>88.58 / 79.50</td>
+              <td>89.40 / 80.88</td>
+            </tr>
+            <tr class="row-ours">
+              <td>CoDiR (Ours &mdash; Best on 7 / 8 Metrics)</td>
+              <td>88.09 / <strong>79.41</strong></td>
+              <td><strong>89.83</strong> / <strong>82.46</strong></td>
+              <td><strong>89.19</strong> / <strong>81.09</strong></td>
+              <td><strong>90.29</strong> / <strong>82.93</strong></td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <!-- Table 3 -->
+      <div class="ref-panel" id="ref-t3">
+        <div class="ablation-grid">
+          <div class="ab-bar-group">
+            <div>
+              <div class="ab-row-head">
+                <span>Mean Teacher Baseline (UNI + DeepLabV3)</span>
+                <span>80.95 &plusmn; 0.12% mDice &middot; 69.09% mJacc</span>
+              </div>
+              <div class="ab-track"><div class="ab-fill" style="width:80.95%"></div></div>
+            </div>
+            <div>
+              <div class="ab-row-head">
+                <span>+ Diffusion Refinement (SDEdit + Mini-UNet)</span>
+                <span><strong>87.31%</strong> (+6.36%) &middot; 78.28% mJacc</span>
+              </div>
+              <div class="ab-track"><div class="ab-fill coral" style="width:87.31%"></div></div>
+            </div>
+            <div>
+              <div class="ab-row-head">
+                <span>+ Confidence-Guided Mask Fusion (<span class="math"><i>m</i></span>)</span>
+                <span><strong>87.50%</strong> (+0.19%) &middot; 78.54% mJacc</span>
+              </div>
+              <div class="ab-track"><div class="ab-fill teal" style="width:87.50%"></div></div>
+            </div>
+            <div>
+              <div class="ab-row-head">
+                <span>+ Confidence Weighting (<span class="math"><i>w</i> = <i>c</i><sub>teacher</sub> &middot; <i>c</i><sub>diff</sub><sup>eff</sup></span>)</span>
+                <span><strong>88.09%</strong> (+0.59%) &middot; 79.41% mJacc</span>
+              </div>
+              <div class="ab-track"><div class="ab-fill teal" style="width:88.09%"></div></div>
+            </div>
+          </div>
+
+          <div class="eq-box">
+            <div class="eq-box-title">CoDiR Training Objectives (Section 2.3)</div>
+            <div class="math"><span class="m-cal">L</span> <span class="m-op">=</span> &frac12; (<span class="m-cal">L</span><sub>sup</sub> <span class="m-op">+</span> <span class="m-cal">L</span><sub>unsup</sub>)</div><br/>
+            <div class="math"><span class="m-cal">L</span><sub>sup</sub> <span class="m-op">=</span> &lambda;<sub>1</sub><span class="m-cal">L</span><sub>CE</sub> <span class="m-op">+</span> &lambda;<sub>2</sub><span class="m-cal">L</span><sub>Dice</sub> <span class="m-op">+</span> &lambda;<sub>3</sub><span class="m-cal">L</span><sub>clDice</sub> <span class="m-op">+</span> &lambda;<sub>4</sub><span class="m-cal">L</span><sub>Boundary</sub></div><br/>
+            <div class="math"><span class="m-cal">L</span><sub>unsup</sub> <span class="m-op">=</span> &lambda;<sub>u</sub><span class="m-cal">L</span><span class="m-subsup"><span>refine</span><span>unsup</span></span> <span class="m-op">+</span> &lambda;<sub>c</sub><span class="m-cal">L</span><span class="m-subsup"><span>cons</span><span>unsup</span></span> &nbsp;(&lambda;<sub>u</sub> = &lambda;<sub>c</sub> = 0.25)</div><br/>
+            <div class="math"><span class="m-cal">L</span><span class="m-subsup"><span>refine</span><span>unsup</span></span> <span class="m-op">=</span> <span class="m-bb">E</span>[ <i>w</i> &middot; (<span class="m-cal">L</span><sub>BCE</sub>(<span class="m-acc m-hat">y</span><span class="m-subsup"><span>w</span><span>u</span></span>, <i>y</i><sub>r</sub>) <span class="m-op">+</span> <span class="m-cal">L</span><sub>Dice</sub>(<span class="m-acc m-hat">y</span><span class="m-subsup"><span>w</span><span>u</span></span>, <i>y</i><sub>r</sub>)) ]</div><br/>
+            <div class="math"><span class="m-cal">L</span><span class="m-subsup"><span>cons</span><span>unsup</span></span> <span class="m-op">=</span> <span class="m-cal">L</span><sub>BCE</sub>(<span class="m-acc m-hat">y</span><span class="m-subsup"><span>s</span><span>u</span></span>, <span class="m-acc m-hat">y</span><span class="m-subsup"><span>w</span><span>u</span></span>) <span class="m-op">+</span> <span class="m-cal">L</span><sub>Dice</sub>(<span class="m-acc m-hat">y</span><span class="m-subsup"><span>s</span><span>u</span></span>, <span class="m-acc m-hat">y</span><span class="m-subsup"><span>w</span><span>u</span></span>)</div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- =======================================================================
+         5. PUBLICATION FOOTER CAPTION
+         ======================================================================= -->
+    <footer class="page-footer">
+      <span>CoDiR: Confidence-Guided Diffusion Refinement for Semi-Supervised Histopathology Segmentation (MICCAI) &middot; Code: <a href="https://github.com/vongla345/codir" target="_blank" rel="noopener noreferrer">github.com/vongla345/codir</a></span>
+      <span>Interactive Isometric Technical Illustration &middot; Crafted in the visual idiom of <em>anatomy</em></span>
+    </footer>
+  </div>
+
+  <script>
+    /* =========================================================================
+       CODIR OPTICAL-MECHANICAL BENCH — PIXEL-EXACT COLOR-PICKING ISOMETRIC ENGINE
+       Pure Vanilla JS · High-DPI Canvas + Aligned SVG Leader Overlay + Bug-Free Math
+       ========================================================================= */
+    (function () {
+      "use strict";
+
+      /* -----------------------------------------------------------------------
+         1. ZERO-DEPENDENCY HTML MATH BUILDER HELPERS
+         ----------------------------------------------------------------------- */
+      const M = {
+        wrap: s => `<span class="math">${s}</span>`,
+        v: s => `<i>${s}</i>`,
+        sub: (b, s) => `${b}<sub>${s}</sub>`,
+        sup: (b, s) => `${b}<sup>${s}</sup>`,
+        subsup: (b, sub, sup) => `${b}<span class="m-subsup"><span>${sup}</span><span>${sub}</span></span>`,
+        hat: ch => `<span class="m-acc m-hat">${ch}</span>`,
+        tilde: ch => `<span class="m-acc m-tilde">${ch}</span>`,
+        bar: ch => `<span class="m-acc m-bar">${ch}</span>`,
+        cal: ch => `<span class="m-cal">${ch}</span>`,
+        bb: ch => `<span class="m-bb">${ch}</span>`,
+        op: s => `<span class="m-op">${s}</span>`
+      };
+
+      /* Reusable publication-grade math snippets */
+      const sym = {
+        yHat: M.wrap(M.hat("y")),
+        yTildeAlpha: M.wrap(M.sub(M.tilde("y"), "&alpha;<sub>n</sub>")),
+        yDiff: M.wrap("<i>y</i><sub>diff</sub>"),
+        yR: M.wrap("<i>y</i><sub>r</sub>"),
+        cTeacher: M.wrap("<i>c</i><sub>teacher</sub>"),
+        cDiffEff: M.wrap(M.subsup("<i>c</i>", "diff", "eff")),
+        cBarTeacher: M.wrap(M.sub(M.bar("c"), "teacher")),
+        wBar: M.wrap(M.bar("w")),
+        alphaN: M.wrap("&alpha;<sub>n</sub>"),
+        thetaBar: M.wrap(M.bar("&theta;")),
+        fTheta: M.wrap("<i>f</i><sub>&theta;</sub>"),
+        fThetaBar: M.wrap("<i>f</i><sub>" + M.bar("&theta;") + "</sub>"),
+        Dl: M.wrap(M.cal("D") + "<sub>l</sub>"),
+        Du: M.wrap(M.cal("D") + "<sub>u</sub>"),
+        Iu: M.wrap("<i>I</i><sub>u</sub>"),
+        AwIu: M.wrap(M.cal("A") + "<sub>w</sub>(<i>I</i><sub>u</sub>)"),
+        AsIu: M.wrap(M.cal("A") + "<sub>s</sub>(<i>I</i><sub>u</sub>)"),
+        epsPhi: M.wrap("&epsilon;<sub>&phi;</sub>"),
+        Lsup: M.wrap(M.cal("L") + "<sub>sup</sub>"),
+        Lunsup: M.wrap(M.cal("L") + "<sub>unsup</sub>"),
+        Lrefine: M.wrap(M.subsup(M.cal("L"), "unsup", "refine")),
+        Lcons: M.wrap(M.subsup(M.cal("L"), "unsup", "cons")),
+        yUw: M.wrap(M.subsup(M.hat("y"), "u", "w")),
+        yUs: M.wrap(M.subsup(M.hat("y"), "u", "s"))
+      };
+
+      /* -----------------------------------------------------------------------
+         2. STATE & 12 GRANULAR MECHANICAL ASSEMBLIES SPECIFICATION (100% ENGLISH)
+         ----------------------------------------------------------------------- */
+      const reducedMotion = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+      const state = {
+        mode: "train",          // "train" | "infer"
+        inferBlend: 0,
+        exploded: false,
+        explodeBlend: 0,
+        showPins: false,        // OFF at rest for clean drafting table aesthetic
+        paused: reducedMotion,
+        dark: false,
+
+        selectedPart: null,     // "01A" .. "06A" or null
+        hoveredPart: null,
+
+        split: "glas-10",       // "glas-10" | "glas-20" | "crag-10" | "crag-20"
+        showPatchGrid: false,
+        tau: 0.75,
+        alphaN: 0.20,
+        kProgress: 1.0,
+        autoCycleK: false,
+        replayingK: false,
+
+        vp5Mode: "gt",          // "gt" | "teacher" | "weight"
+        compareSplit: 0.58,
+
+        time: 0,
+        emaAngle: 0,
+
+        meanConf: 0.842,
+        mPercent: 17.8,
+        meanWeight: 0.778,
+        estDice: 88.09,
+        estJacc: 79.41
+      };
+
+      const PART_ORDER = ["01A", "01B", "02A", "02B", "02C", "03A", "04A", "04B", "05A", "05B", "05C", "06A"];
+
+      const PARTS = {
+        "01A": {
+          id: "01A", pin: "01", short: "H&E Slide Tray",
+          title: "H&E Slide Tray",
+          sub: "Station 01 · Input Histopathology Feed",
+          status: "ACTIVE", statusClass: "active", bypassInInfer: false,
+          input: `H&E-stained colorectal histopathology images (256&times;256) partitioned into scarce labeled data ${sym.Dl} (10% / 20% with Ground Truth) and abundant unlabeled data ${sym.Du} (90% / 80%).`,
+          op: `Spring-loaded brass slide clamps lock the tissue slide onto the precision micrometer stage, indexing both labeled and unlabeled samples into the optical path.`,
+          output: `Normalized RGB image tensor ${M.wrap("<i>I</i> &isin; " + M.bb("R") + "<sup><i>B</i>&times;3&times;256&times;256</sup>")} fed to the beam-splitter prism and encoder stage.`,
+          eq: M.wrap("<i>I</i> &isin; " + M.bb("R") + "<sup><i>B</i>&times;3&times;256&times;256</sup> &nbsp;&rarr;&nbsp; " + M.cal("D") + "<sub>l</sub> (10% / 20%) &cup; " + M.cal("D") + "<sub>u</sub> (90% / 80%)"),
+          telemetry: () => `${state.split.toUpperCase()} &middot; 256&times;256 RGB`
+        },
+        "01B": {
+          id: "01B", pin: "02", short: "Beam-Splitter",
+          title: "Beam-Splitter Prism & Augmenter",
+          sub: "Station 01 · Dual-View Augmentation Splitter",
+          status: "ACTIVE", statusClass: "active", bypassInInfer: true,
+          bypassReason: "In Inference Only mode, full-resolution histopathology slides are tiled into non-overlapping 256&times;256 patches and routed directly to UNI + Student without augmentation.",
+          input: `Labeled samples ${sym.Dl} and unlabeled images ${sym.Iu} &isin; ${sym.Du} advancing from the H&E slide tray.`,
+          op: `Twin brass-mounted optical prisms split each unlabeled image ${sym.Iu} into a weakly augmented view ${sym.AwIu} (for Teacher &amp; Student) and a strongly augmented view ${sym.AsIu} (for Student consistency).`,
+          output: `Paired dual-view streams {${sym.AwIu}, ${sym.AsIu}} driving pseudo-label generation and consistency regularization ${sym.Lcons}.`,
+          eq: M.wrap("<i>I</i><sub>u</sub> &nbsp;&rarr;&nbsp; " + M.cal("A") + "<sub>w</sub>(<i>I</i><sub>u</sub>) [Teacher &amp; Student] &nbsp;|&nbsp; " + M.cal("A") + "<sub>s</sub>(<i>I</i><sub>u</sub>) [Student]"),
+          telemetry: () => state.mode === "infer" ? "BYPASSED (Non-overlap Patches)" : "Dual-View: A<sub>w</sub> + A<sub>s</sub>"
+        },
+        "02A": {
+          id: "02A", pin: "03", short: "UNI ViT-L/16",
+          title: "Frozen UNI ViT-L/16 Optical Encoder",
+          sub: "Station 02 · Pathology Foundation Backbone",
+          status: "FROZEN", statusClass: "frozen", bypassInInfer: false,
+          input: `H&E tissue patches (256&times;256) delivered from the slide tray or beam-splitter prism.`,
+          op: `Ice-blue pathology foundation encoder divides the image into a 16&times;16 patch grid (${M.wrap("<i>N</i> = 256")} tokens, ${M.wrap("<i>d</i><sub>img</sub> = 1024")}), discards the CLS token, and keeps all weights frozen (Table 2: 88.09% vs. CONCH 78.89%).`,
+          output: `Rich 2D spatial pathology feature grid ${M.wrap("<i>F</i><sub>img</sub> &isin; " + M.bb("R") + "<sup><i>B</i>&times;256&times;1024</sup>")} feeding the DeepLabV3 decoder.`,
+          eq: M.wrap("<i>F</i><sub>img</sub> = UNI(<i>I</i>) &isin; " + M.bb("R") + "<sup><i>B</i>&times;<i>N</i>&times;1024</sup>, &nbsp; <i>N</i> = (<i>H</i>/16)&times;(<i>W</i>/16) = 256 &nbsp;[Frozen]"),
+          telemetry: () => `${M.wrap("<i>d</i><sub>img</sub> = 1024")} &middot; 16&times;16 patches &middot; Frozen`
+        },
+        "02B": {
+          id: "02B", pin: "04", short: "Student ASPP",
+          title: "Trainable Student DeepLabV3 ASPP Decoder",
+          sub: "Station 02 · Primary Segmentation Tower",
+          status: "TRAINABLE", statusClass: "trainable", bypassInInfer: false,
+          input: `Reshaped 2D patch feature grid ${M.wrap("<i>F</i><sub>img</sub>")} from the frozen UNI ViT-L/16 encoder.`,
+          op: `Brass-and-coral multi-scale ASPP lens tower aggregates contextual gland features and upsamples to full resolution. Optimized via AdamW (lr = 1&times;10<sup>&minus;4</sup>). This is the ONLY active decoder at test time.`,
+          output: `Per-pixel segmentation logit map ${M.wrap("<i>S</i><sup>(s)</sup> &isin; " + M.bb("R") + "<sup><i>B</i>&times;1&times;<i>H</i>&times;<i>W</i></sup>")} for labeled and unlabeled views (${sym.yUw}, ${sym.yUs}).`,
+          eq: M.wrap("<i>S</i><sup>(s)</sup> = <i>f</i><sub>&theta;</sub>(<i>I</i>) = DeepLabV3<sub>ASPP</sub>(<i>F</i><sub>img</sub>) &isin; " + M.bb("R") + "<sup><i>B</i>&times;1&times;<i>H</i>&times;<i>W</i></sup>"),
+          telemetry: () => state.mode === "infer" ? `SOLE ACTIVE ENGINE (${M.wrap("&tau; = 0.75")})` : "AdamW lr=1e-4 &middot; 100 epochs"
+        },
+        "02C": {
+          id: "02C", pin: "05", short: "EMA Teacher",
+          title: "EMA Teacher Decoder & Flywheel",
+          sub: "Station 02 · Momentum Pseudo-Label Generator",
+          status: "EMA &alpha;=0.99", statusClass: "ema", bypassInInfer: true,
+          bypassReason: "The EMA Teacher and momentum flywheel are used exclusively during semi-supervised training to generate soft pseudo-masks, incurring zero test-time overhead.",
+          input: `Weakly augmented unlabeled image ${sym.AwIu} and Student parameters ${M.wrap("&theta;")} coupled through the brass EMA flywheel shaft.`,
+          op: `No gradients backpropagate into Teacher; the spinning brass inertia flywheel tracks an exponential moving average of Student weights (${M.wrap("&alpha; = 0.99")}) to stabilize pseudo-label predictions.`,
+          output: `Soft probability pseudo-mask ${sym.yHat} = ${M.wrap("&sigma;(<i>f</i><sub>" + M.bar("&theta;") + "</sub>(" + M.cal("A") + "<sub>w</sub>(<i>I</i><sub>u</sub>))) &isin; [0, 1]")}.`,
+          eq: M.wrap(M.bar("&theta;") + " &larr; 0.99&middot;" + M.bar("&theta;") + " + 0.01&middot;&theta; &nbsp;|&nbsp; " + M.hat("y") + " = &sigma;(<i>f</i><sub>" + M.bar("&theta;") + "</sub>(" + M.cal("A") + "<sub>w</sub>(<i>I</i><sub>u</sub>)))"),
+          telemetry: () => state.mode === "infer" ? "POWERED DOWN" : `${M.wrap("&alpha; = 0.99")} &middot; ${sym.cBarTeacher} = ${state.meanConf.toFixed(3)}`
+        },
+        "03A": {
+          id: "03A", pin: "06", short: "Confidence Gate",
+          title: "Adaptive Confidence Gauge & Shutter Gate",
+          sub: "Station 03 · FreeMatch Selective Routing",
+          status: "ACTIVE", statusClass: "active", bypassInInfer: true,
+          bypassReason: "Adaptive confidence gating only routes uncertain training pseudo-labels to the diffusion refiner. During inference, Student predictions are binarized directly at fixed &tau; = 0.75.",
+          input: `Soft Teacher pseudo-mask ${sym.yHat} delivered along the brass conduit from Station 02.`,
+          op: `Computes per-pixel confidence ${sym.cTeacher} = ${M.wrap("max(" + M.hat("y") + ", 1 &minus; " + M.hat("y") + ")")}. The upright dial gauge tracks FreeMatch adaptive threshold ${M.wrap("&tau; &isin; [0.60, 0.75]")}, sliding the mechanical shutter to isolate low-confidence pixels.`,
+          output: `Binary refinement mask ${M.wrap("<i>m</i> = " + M.bb("1") + "[<i>c</i><sub>teacher</sub> &lt; &tau;]")} splitting high-confidence teal (${M.wrap("<i>m</i> = 0")}) from uncertain coral (${M.wrap("<i>m</i> = 1")}).`,
+          eq: M.wrap("<i>c</i><sub>teacher</sub> = max(" + M.hat("y") + ", 1 &minus; " + M.hat("y") + "), &nbsp; <i>m</i> = " + M.bb("1") + "[<i>c</i><sub>teacher</sub> &lt; &tau;]"),
+          telemetry: () => `${M.wrap("&tau; = " + state.tau.toFixed(2))} &middot; ${M.wrap("<i>m</i> = 1")}: ${state.mPercent.toFixed(1)}% px`
+        },
+        "04A": {
+          id: "04A", pin: "07", short: "Noise Valve",
+          title: "Partial Noising Rotary Valve",
+          sub: "Station 04 · SDEdit Perturbation Control",
+          status: "ACTIVE", statusClass: "active", bypassInInfer: true,
+          bypassReason: "Partial SDEdit noising is part of the training-time pseudo-label refinement loop and is completely disabled during Inference Only.",
+          input: `Teacher soft pseudo-mask ${sym.yHat} routed through the coral uncertain-region conduit (${M.wrap("<i>m</i> = 1")}).`,
+          op: `Knurled brass rotary valve injects calibrated Gaussian noise up to intermediate ratio ${sym.alphaN} = 0.20 (out of ${M.wrap("<i>T</i> = 100")} steps), erasing spurious boundary errors while retaining coarse gland layout.`,
+          output: `Partially noised mask ${sym.yTildeAlpha} concatenated channel-wise with ${sym.Iu} for conditional reverse denoising.`,
+          eq: M.wrap(M.sub(M.tilde("y"), "&alpha;<sub>n</sub>") + " = &radic;" + M.sub(M.bar("&alpha;"), "t") + "&middot;(2" + M.hat("y") + " &minus; 1) + &radic;(1 &minus; " + M.sub(M.bar("&alpha;"), "t") + ")&middot;&epsilon; &nbsp;[<i>T</i> = 100, &alpha;<sub>n</sub> = 0.20]"),
+          telemetry: () => `${M.wrap("&alpha;<sub>n</sub> = " + state.alphaN.toFixed(2))} &middot; ${M.wrap("<i>t</i> = " + Math.max(5, Math.round(state.alphaN * 100)) + "/100")}`
+        },
+        "04B": {
+          id: "04B", pin: "08", short: "Mini-UNet Chamber",
+          title: "Conditional Mini-UNet Diffusion Chamber",
+          sub: "Station 04 · Learned Structural Prior Refiner",
+          status: "TRAINABLE", statusClass: "trainable", bypassInInfer: true,
+          bypassReason: "Structural gland priors learned by the diffusion refiner (+6.36% mDice) are distilled into the Student weights during training; the diffusion chamber is shut off at inference.",
+          input: `Channel-concatenated pair [${sym.yTildeAlpha}, ${sym.Iu}] entering the glass-walled diffusion chamber.`,
+          op: `Low-capacity conditional Mini-UNet ${sym.epsPhi} (trained exclusively on labeled subset ${sym.Dl} to prevent overfitting) executes ${M.wrap("<i>K</i>")} reverse DDPM steps, repairing broken narrow glands and removing artifacts.`,
+          output: `Structurally refined mask ${sym.yDiff} = ${M.wrap("Denoise<sub><i>K</i></sub>(" + M.sub(M.tilde("y"), "&alpha;<sub>n</sub>") + ", <i>I</i><sub>u</sub>; &epsilon;<sub>&phi;</sub>)")} sent to the optical fusion press.`,
+          eq: M.wrap("<i>y</i><sub>diff</sub> = Denoise<sub><i>K</i></sub>(" + M.sub(M.tilde("y"), "&alpha;<sub>n</sub>") + ", <i>I</i><sub>u</sub>; &epsilon;<sub>&phi;</sub>) &nbsp;[Largest gain: +6.36% mDice]"),
+          telemetry: () => {
+            const kTot = Math.max(5, Math.round(state.alphaN * 100));
+            return `${M.wrap("<i>K</i> = " + Math.round(state.kProgress * kTot) + "/" + kTot)} steps (${Math.round(state.kProgress * 100)}%)`;
+          }
+        },
+        "05A": {
+          id: "05A", pin: "09", short: "Fusion Press",
+          title: "Confidence-Guided Optical Fusion Press",
+          sub: "Station 05 · Selective Mask Compositor",
+          status: "ACTIVE", statusClass: "active", bypassInInfer: true,
+          bypassReason: "Pseudo-label fusion operates only inside the semi-supervised training loop to construct y_r for Student supervision.",
+          input: `Two optical film layers: reliable Teacher regions ${M.wrap("(1 &minus; <i>m</i>) &odot; " + M.hat("y"))} and refined Diffusion regions ${M.wrap("<i>m</i> &odot; <i>y</i><sub>diff</sub>")}.`,
+          op: `Twin chrome guide rods and helical compression springs press both masks in exact spatial registration via gating mask ${M.wrap("<i>m</i>")}, correcting only uncertain pixels without corrupting confident predictions.`,
+          output: `Fused pseudo-label ${sym.yR} that suppresses confirmation bias (+0.19% mDice over raw diffusion).`,
+          eq: M.wrap("<i>y</i><sub>r</sub> = <i>m</i> &odot; <i>y</i><sub>diff</sub> + (1 &minus; <i>m</i>) &odot; " + M.hat("y") + " &nbsp;[<i>m</i> = " + M.bb("1") + "(<i>c</i><sub>teacher</sub> &lt; &tau;)]"),
+          telemetry: () => `Refined ${state.mPercent.toFixed(1)}% &middot; Preserved ${(100 - state.mPercent).toFixed(1)}%`
+        },
+        "05B": {
+          id: "05B", pin: "10", short: "Weighting w",
+          title: "Pixel Confidence Weighting Module",
+          sub: "Station 05 · Agreement-Based Supervision Gate",
+          status: "ACTIVE", statusClass: "active", bypassInInfer: true,
+          bypassReason: "Per-pixel confidence weighting w only modulates the unsupervised refinement loss during training and is bypassed during Inference Only.",
+          input: `Teacher confidence map ${sym.cTeacher}, Diffusion certainty from ${sym.yDiff}, and binary gate ${M.wrap("<i>m</i>")}.`,
+          op: `Dual-dial brass multiplier computes pixel-wise agreement weight ${M.wrap("<i>w</i> = <i>c</i><sub>teacher</sub> &middot; " + M.subsup("<i>c</i>", "diff", "eff"))}, down-weighting residual ambiguity and amplifying high-agreement pixels.`,
+          output: `Continuous supervision weight map ${M.wrap("<i>w</i> &isin; [0, 1]<sup><i>H</i>&times;<i>W</i></sup>")} adding +0.59% mDice on GlaS 10%.`,
+          eq: M.wrap("<i>w</i> = <i>c</i><sub>teacher</sub> &middot; " + M.subsup("<i>c</i>", "diff", "eff") + ", &nbsp; " + M.subsup("<i>c</i>", "diff", "eff") + " = <i>m</i>&odot;max(<i>y</i><sub>diff</sub>, 1&minus;<i>y</i><sub>diff</sub>) + (1&minus;<i>m</i>)&odot;<i>c</i><sub>teacher</sub>"),
+          telemetry: () => `${sym.wBar} = ${state.meanWeight.toFixed(3)} &middot; +0.59% mDice`
+        },
+        "05C": {
+          id: "05C", pin: "11", short: "Loss Conduit",
+          title: "Dual-Objective Loss Feedback Conduit",
+          sub: "Station 05 &rarr; 02 · Gradient Return Bus",
+          status: "ACTIVE", statusClass: "active", bypassInInfer: true,
+          bypassReason: "No loss computation or gradient backpropagation occurs in Inference Only mode.",
+          input: `Fused pseudo-mask ${sym.yR}, confidence weights ${M.wrap("<i>w</i>")}, Student predictions (${sym.yUw}, ${sym.yUs}), and labeled Ground Truth.`,
+          op: `Braided copper-and-teal return conduit feeds combined supervised gradients (${sym.Lsup}: CE + Dice + clDice + Boundary) and unsupervised gradients (${sym.Lunsup}: confidence-weighted refine + consistency) back to Student.`,
+          output: `Parameter updates ${M.wrap("&theta;")} driving Student DeepLabV3 convergence over 100 epochs.`,
+          eq: M.wrap(M.cal("L") + " = &frac12;(" + M.cal("L") + "<sub>sup</sub> + " + M.cal("L") + "<sub>unsup</sub>), &nbsp; " + M.cal("L") + "<sub>unsup</sub> = 0.25&middot;" + M.subsup(M.cal("L"), "unsup", "refine") + "(<i>w</i>) + 0.25&middot;" + M.subsup(M.cal("L"), "unsup", "cons")),
+          telemetry: () => state.mode === "infer" ? "NO BACKPROP" : `${M.wrap("&lambda;<sub>u</sub> = &lambda;<sub>c</sub> = 0.25")} &middot; clDice + Bdy`
+        },
+        "06A": {
+          id: "06A", pin: "12", short: "Output Stage",
+          title: "Illuminated Output Inspection Stage",
+          sub: "Station 06 · Final Mask & Patch Stitching",
+          status: "ACTIVE", statusClass: "active", bypassInInfer: false,
+          input: `Fused pseudo-mask ${sym.yR} (Training Loop) or stitched non-overlapping 256&times;256 Student predictions (Inference Only).`,
+          op: `Backlit optical glass platen displays the final gland segmentation mask with clean boundaries, intact narrow gland bridges, and suppressed false positives.`,
+          output: `State-of-the-art accuracy on 7 of 8 benchmark metrics across GlaS (88.09% / 89.19%) and CRAG (89.83% / 90.29% mDice).`,
+          eq: M.wrap("GlaS: 88.09% (10%) / 89.19% (20%) &nbsp;|&nbsp; CRAG: 89.83% (10%) / 90.29% (20%)"),
+          telemetry: () => `mDice ${state.estDice.toFixed(2)}% &middot; mJacc ${state.estJacc.toFixed(2)}%`
+        }
+      };
+
+      /* Build 12-part quick-select index chips */
+      const partsIndexBar = document.getElementById("parts-index-bar");
+      PART_ORDER.forEach(id => {
+        const p = PARTS[id];
+        const btn = document.createElement("button");
+        btn.className = "part-chip";
+        btn.dataset.part = id;
+        btn.innerHTML = `<span class="chip-id">${id}</span><span>${p.short}</span>`;
+        btn.addEventListener("click", () => selectPart(id));
+        partsIndexBar.appendChild(btn);
+      });
+
+      /* -----------------------------------------------------------------------
+         3. PROCEDURAL HISTOPATHOLOGY ENGINE (SHARED BY MACHINE & 5 FILMSTRIPS)
+         ----------------------------------------------------------------------- */
+      const GRID = 128;
+      const tissueCache = {};
+
+      const stageCanvases = {
+        he: document.createElement("canvas"),
+        teacher: document.createElement("canvas"),
+        gate: document.createElement("canvas"),
+        diff: document.createElement("canvas"),
+        output: document.createElement("canvas"),
+        outputPure: document.createElement("canvas")
+      };
+      Object.values(stageCanvases).forEach(c => { c.width = GRID; c.height = GRID; });
+
+      function hash2D(x, y, seed) {
+        const n = Math.sin(x * 127.1 + y * 311.7 + seed * 74.7) * 43758.5453123;
+        return n - Math.floor(n);
+      }
+
+      function smoothNoise(x, y, seed) {
+        const ix = Math.floor(x), iy = Math.floor(y);
+        const fx = x - ix, fy = y - iy;
+        const ux = fx * fx * (3 - 2 * fx);
+        const uy = fy * fy * (3 - 2 * fy);
+        const a = hash2D(ix, iy, seed);
+        const b = hash2D(ix + 1, iy, seed);
+        const c = hash2D(ix, iy + 1, seed);
+        const d = hash2D(ix + 1, iy + 1, seed);
+        return a + (b - a) * ux + (c - a) * uy + (a - b - c + d) * ux * uy;
+      }
+
+      function getDatasetKey() {
+        return state.split.startsWith("crag") ? "crag" : "glas";
+      }
+
+      function buildTissue(dsKey) {
+        if (tissueCache[dsKey]) return tissueCache[dsKey];
+
+        const gt = new Float32Array(GRID * GRID);
+        const teacherProb = new Float32Array(GRID * GRID);
+        const heRGBA = new Uint8ClampedArray(GRID * GRID * 4);
+        const ddpmNoise = new Float32Array(GRID * GRID);
+        const halluField = new Float32Array(GRID * GRID);
+
+        for (let y = 0; y < GRID; y++) {
+          for (let x = 0; x < GRID; x++) {
+            const u = x / GRID, v = y / GRID;
+            const idx = y * GRID + x;
+
+            let sdf = 10.0;
+            if (dsKey === "glas") {
+              const glands = [
+                { cx: 0.27, cy: 0.27, rx: 0.16, ry: 0.12, rot: 0.28 },
+                { cx: 0.70, cy: 0.27, rx: 0.17, ry: 0.11, rot: -0.35 },
+                { cx: 0.49, cy: 0.54, rx: 0.25, ry: 0.082, rot: 0.12 },
+                { cx: 0.24, cy: 0.76, rx: 0.14, ry: 0.12, rot: -0.18 },
+                { cx: 0.75, cy: 0.74, rx: 0.15, ry: 0.135, rot: 0.45 }
+              ];
+              for (let i = 0; i < glands.length; i++) {
+                const g = glands[i];
+                const dx = u - g.cx, dy = v - g.cy;
+                const c = Math.cos(g.rot), s = Math.sin(g.rot);
+                const rx = (dx * c - dy * s) / g.rx;
+                const ry = (dx * s + dy * c) / g.ry;
+                sdf = Math.min(sdf, (Math.hypot(rx, ry) - 1.0) * Math.min(g.rx, g.ry));
+              }
+            } else {
+              const wx = (smoothNoise(u * 4.8, v * 4.8, 13) - 0.5) * 0.13;
+              const wy = (smoothNoise(u * 4.8, v * 4.8, 29) - 0.5) * 0.13;
+              const wu = u + wx, wv = v + wy;
+              const lobes = [
+                { cx: 0.30, cy: 0.34, r: 0.21 },
+                { cx: 0.69, cy: 0.31, r: 0.185 },
+                { cx: 0.55, cy: 0.68, r: 0.22 },
+                { cx: 0.22, cy: 0.76, r: 0.135 }
+              ];
+              for (let i = 0; i < lobes.length; i++) {
+                sdf = Math.min(sdf, Math.hypot(wu - lobes[i].cx, wv - lobes[i].cy) - lobes[i].r);
+              }
+            }
+
+            sdf += (smoothNoise(u * 13, v * 13, 5) - 0.5) * 0.017;
+            gt[idx] = sdf < 0 ? 1.0 : 0.0;
+
+            const grain = smoothNoise(u * 26, v * 26, 9);
+            const nuclei = hash2D(x, y, 21) > 0.91 ? 1.0 : 0.0;
+            let r, g, b;
+            if (sdf < -0.026) {
+              r = 247 - grain * 14; g = 236 - grain * 18; b = 244 - grain * 14;
+            } else if (sdf < 0.018) {
+              r = 122 - grain * 24 - nuclei * 36; g = 56 - grain * 16 - nuclei * 24; b = 148 - grain * 22 - nuclei * 20;
+            } else {
+              r = 224 - grain * 22 - nuclei * 72; g = 176 - grain * 26 - nuclei * 76; b = 208 - grain * 20 - nuclei * 44;
+            }
+            heRGBA[idx * 4] = Math.max(0, Math.min(255, r));
+            heRGBA[idx * 4 + 1] = Math.max(0, Math.min(255, g));
+            heRGBA[idx * 4 + 2] = Math.max(0, Math.min(255, b));
+            heRGBA[idx * 4 + 3] = 255;
+
+            let p = 1 / (1 + Math.exp(sdf * 42));
+            const br = Math.hypot(u - 0.49, v - 0.54);
+            if (br < 0.135) {
+              const w = Math.cos((br / 0.135) * Math.PI * 0.5);
+              p = p * (1 - 0.56 * w) + 0.34 * (0.56 * w);
+            }
+            const fp = Math.hypot(u - 0.85, v - 0.45);
+            if (fp < 0.095) {
+              const w = Math.cos((fp / 0.095) * Math.PI * 0.5);
+              p = Math.max(p, 0.66 * w);
+            }
+            if (Math.abs(sdf) < 0.032) {
+              const amb = (smoothNoise(u * 12, v * 12, 43) - 0.5) * 0.32;
+              p = p * 0.72 + 0.5 * 0.28 + amb;
+            }
+            teacherProb[idx] = Math.max(0.02, Math.min(0.98, p));
+            ddpmNoise[idx] = hash2D(x, y, 97) + hash2D(x, y, 109) - 1.0;
+            halluField[idx] = (smoothNoise(u * 9, v * 9, 73) - 0.5) * 2.0;
+          }
+        }
+
+        tissueCache[dsKey] = { gt, teacherProb, heRGBA, ddpmNoise, halluField };
+        return tissueCache[dsKey];
+      }
+
+      const vpCanvases = [1, 2, 3, 4, 5].map(i => document.getElementById(`vp-${i}`));
+      const vpCtxs = vpCanvases.map(c => c.getContext("2d"));
+
+      function updateHistopathologyStages() {
+        const dsKey = getDatasetKey();
+        const { gt, teacherProb, heRGBA, ddpmNoise, halluField } = buildTissue(dsKey);
+
+        const teachRGBA = new Uint8ClampedArray(GRID * GRID * 4);
+        const gateRGBA = new Uint8ClampedArray(GRID * GRID * 4);
+        const diffRGBA = new Uint8ClampedArray(GRID * GRID * 4);
+        const outPureRGBA = new Uint8ClampedArray(GRID * GRID * 4);
+        const outCmpRGBA = new Uint8ClampedArray(GRID * GRID * 4);
+
+        const tau = state.tau;
+        const alpha = state.alphaN;
+        const kProg = state.kProgress;
+        const splitX = Math.floor(state.compareSplit * GRID);
+
+        const refineStrength = alpha < 0.20
+          ? 0.54 + ((alpha - 0.05) / 0.15) * 0.42
+          : Math.max(0.75, 0.96 - (alpha - 0.20) * 0.36);
+        const halluAmp = alpha > 0.32 ? (alpha - 0.32) * 0.62 : 0;
+
+        let refinedCount = 0;
+        let sumWeight = 0;
+        let sumConf = 0;
+
+        for (let y = 0; y < GRID; y++) {
+          for (let x = 0; x < GRID; x++) {
+            const idx = y * GRID + x;
+            const p4 = idx * 4;
+            const yHat = teacherProb[idx];
+            const gtVal = gt[idx];
+
+            const cTeacher = Math.max(yHat, 1 - yHat);
+            sumConf += cTeacher;
+            const m = cTeacher < tau ? 1 : 0;
+            if (m === 1) refinedCount++;
+
+            const noisy = Math.max(0, Math.min(1, yHat + ddpmNoise[idx] * alpha * 1.5));
+            const cleanDiff = Math.max(0.01, Math.min(0.99,
+              yHat * (1 - refineStrength) + gtVal * refineStrength + halluField[idx] * halluAmp
+            ));
+            const yDiff = noisy * (1 - kProg) + cleanDiff * kProg;
+            const yR = m === 1 ? yDiff : yHat;
+
+            const cDiffEff = m === 1 ? Math.max(yDiff, 1 - yDiff) : cTeacher;
+            const w = cTeacher * cDiffEff;
+            sumWeight += w;
+
+            const tv = Math.round(yHat * 245);
+            if (cTeacher < tau) {
+              teachRGBA[p4] = Math.min(255, Math.round(tv * 0.72 + 95));
+              teachRGBA[p4 + 1] = Math.round(tv * 0.64 + 28);
+              teachRGBA[p4 + 2] = Math.round(tv * 0.58 + 20);
+            } else {
+              teachRGBA[p4] = tv;
+              teachRGBA[p4 + 1] = tv;
+              teachRGBA[p4 + 2] = Math.min(255, tv + 10);
+            }
+            teachRGBA[p4 + 3] = 255;
+
+            if (m === 1) {
+              gateRGBA[p4] = Math.round(170 + noisy * 85);
+              gateRGBA[p4 + 1] = Math.round(62 + noisy * 75);
+              gateRGBA[p4 + 2] = Math.round(46 + noisy * 58);
+            } else {
+              const sh = Math.round((cTeacher - 0.5) * 2 * 155);
+              gateRGBA[p4] = 26 + Math.round(sh * 0.25);
+              gateRGBA[p4 + 1] = 60 + Math.round(sh * 0.68);
+              gateRGBA[p4 + 2] = 64 + Math.round(sh * 0.62);
+            }
+            gateRGBA[p4 + 3] = 255;
+
+            const dv = Math.round(yDiff * 252);
+            diffRGBA[p4] = dv;
+            diffRGBA[p4 + 1] = Math.min(255, dv + (kProg > 0.65 ? 8 : 0));
+            diffRGBA[p4 + 2] = Math.min(255, dv + (kProg < 0.45 ? 10 : 6));
+            diffRGBA[p4 + 3] = 255;
+
+            const rv = Math.round(yR * 252);
+            outPureRGBA[p4] = rv;
+            outPureRGBA[p4 + 1] = Math.min(255, rv + (m === 1 ? 12 : 0));
+            outPureRGBA[p4 + 2] = Math.min(255, rv + (m === 1 ? 8 : 0));
+            outPureRGBA[p4 + 3] = 255;
+
+            if (state.vp5Mode === "weight") {
+              const wn = Math.max(0, Math.min(1, (w - 0.25) / 0.75));
+              outCmpRGBA[p4] = Math.round(35 + wn * 195);
+              outCmpRGBA[p4 + 1] = Math.round(45 + Math.sin(wn * Math.PI) * 145 + wn * 55);
+              outCmpRGBA[p4 + 2] = Math.round(90 + (1 - wn) * 90);
+              outCmpRGBA[p4 + 3] = 255;
+            } else if (x < splitX) {
+              outCmpRGBA[p4] = outPureRGBA[p4];
+              outCmpRGBA[p4 + 1] = outPureRGBA[p4 + 1];
+              outCmpRGBA[p4 + 2] = outPureRGBA[p4 + 2];
+              outCmpRGBA[p4 + 3] = 255;
+            } else if (state.vp5Mode === "teacher") {
+              outCmpRGBA[p4] = tv;
+              outCmpRGBA[p4 + 1] = tv;
+              outCmpRGBA[p4 + 2] = Math.min(255, tv + 10);
+              outCmpRGBA[p4 + 3] = 255;
+            } else {
+              const gv = gtVal > 0.5 ? 248 : 18;
+              outCmpRGBA[p4] = gv;
+              outCmpRGBA[p4 + 1] = gv;
+              outCmpRGBA[p4 + 2] = gv;
+              outCmpRGBA[p4 + 3] = 255;
+            }
+          }
+        }
+
+        stageCanvases.he.getContext("2d").putImageData(new ImageData(heRGBA, GRID, GRID), 0, 0);
+        stageCanvases.teacher.getContext("2d").putImageData(new ImageData(teachRGBA, GRID, GRID), 0, 0);
+        stageCanvases.gate.getContext("2d").putImageData(new ImageData(gateRGBA, GRID, GRID), 0, 0);
+        stageCanvases.diff.getContext("2d").putImageData(new ImageData(diffRGBA, GRID, GRID), 0, 0);
+        stageCanvases.outputPure.getContext("2d").putImageData(new ImageData(outPureRGBA, GRID, GRID), 0, 0);
+        stageCanvases.output.getContext("2d").putImageData(new ImageData(outCmpRGBA, GRID, GRID), 0, 0);
+
+        [stageCanvases.he, stageCanvases.teacher, stageCanvases.gate, stageCanvases.diff, stageCanvases.output].forEach((src, i) => {
+          vpCtxs[i].imageSmoothingEnabled = true;
+          vpCtxs[i].clearRect(0, 0, 180, 180);
+          vpCtxs[i].drawImage(src, 0, 0, 180, 180);
+        });
+
+        if (state.showPatchGrid || state.mode === "infer") {
+          const ctx1 = vpCtxs[0];
+          const step = state.mode === "infer" ? 45 : 180 / 16;
+          ctx1.strokeStyle = state.mode === "infer" ? "rgba(224, 176, 85, 0.9)" : "rgba(255, 255, 255, 0.44)";
+          ctx1.lineWidth = state.mode === "infer" ? 1.4 : 0.7;
+          ctx1.beginPath();
+          for (let g = step; g < 180; g += step) {
+            ctx1.moveTo(g, 0); ctx1.lineTo(g, 180);
+            ctx1.moveTo(0, g); ctx1.lineTo(180, g);
+          }
+          ctx1.stroke();
+        }
+
+        const total = GRID * GRID;
+        state.meanConf = sumConf / total;
+        state.mPercent = (refinedCount / total) * 100;
+        state.meanWeight = sumWeight / total;
+
+        const baseTable = {
+          "glas-10": { dice: 88.09, jacc: 79.41, label: "GlaS \u00B7 10% Labeled" },
+          "glas-20": { dice: 89.19, jacc: 81.09, label: "GlaS \u00B7 20% Labeled" },
+          "crag-10": { dice: 89.83, jacc: 82.46, label: "CRAG \u00B7 10% Labeled" },
+          "crag-20": { dice: 90.29, jacc: 82.93, label: "CRAG \u00B7 20% Labeled" }
+        }[state.split];
+
+        const tauDelta = -Math.abs(tau - 0.75) * 7.6;
+        const alphaDelta = alpha < 0.20
+          ? -((0.20 - alpha) / 0.15) * 1.02
+          : -Math.min(0.48, ((alpha - 0.20) / 0.20) * 0.48);
+        const kDelta = -(1 - kProg) * 5.6;
+
+        state.estDice = Math.max(70, baseTable.dice + tauDelta + alphaDelta + kDelta);
+        state.estJacc = Math.max(58, baseTable.jacc + (tauDelta + alphaDelta + kDelta) * 1.32);
+
+        document.getElementById("tel-conf").textContent = state.meanConf.toFixed(3);
+        document.getElementById("tel-tau").textContent = tau.toFixed(2);
+        document.getElementById("tel-alpha").textContent = alpha.toFixed(2);
+        document.getElementById("tel-m").textContent = `${state.mPercent.toFixed(1)}%`;
+        document.getElementById("tel-dice").textContent = `${state.estDice.toFixed(2)}%`;
+        document.getElementById("film-ds-tag").textContent = baseTable.label;
+        document.getElementById("cap-1").textContent = dsKey === "glas"
+          ? "Colorectal gland H&E histology (GlaS, 256\u00D7256): purple epithelium, pink stroma, white lumen."
+          : "Irregular large colorectal glands (CRAG, 256\u00D7256): high shape variance where Diffusion yields maximal gain.";
+
+        if (state.selectedPart) refreshCalloutLive();
+      }
+
+      /* -----------------------------------------------------------------------
+         4. CANVAS VECTOR MATH TYPOGRAPHY HELPER (NO COMBINING UNICODE)
+         ----------------------------------------------------------------------- */
+      function drawMathCanvas(ctx, x, y, opts) {
+        const {
+          base = "",
+          sub = "",
+          sup = "",
+          accent = null, // "hat" | "tilde" | "bar" | null
+          suffix = "",
+          size = 10,
+          color = "#1c1917",
+          italic = true
+        } = opts;
+
+        ctx.save();
+        ctx.fillStyle = color;
+        ctx.strokeStyle = color;
+        ctx.textBaseline = "middle";
+        ctx.textAlign = "left";
+
+        ctx.font = `${italic ? "italic " : ""}600 ${size}px Georgia, "Times New Roman", serif`;
+        const baseW = ctx.measureText(base).width;
+
+        ctx.font = `600 ${Math.round(size * 0.72)}px Georgia, "Times New Roman", serif`;
+        const subW = sub ? ctx.measureText(sub).width : 0;
+        const supW = sup ? ctx.measureText(sup).width : 0;
+
+        ctx.font = `700 ${Math.round(size * 0.88)}px "JetBrains Mono", monospace`;
+        const sufW = suffix ? ctx.measureText(suffix).width : 0;
+
+        const totalW = baseW + Math.max(subW, supW) + sufW;
+        let curX = x - totalW * 0.5;
+
+        // Draw base symbol
+        ctx.font = `${italic ? "italic " : ""}600 ${size}px Georgia, "Times New Roman", serif`;
+        ctx.fillText(base, curX, y);
+
+        // Draw crisp vector over-accent (hat / bar / tilde)
+        if (accent) {
+          const cx = curX + baseW * 0.52;
+          const ay = y - size * 0.56;
+          ctx.lineWidth = Math.max(1, size * 0.11);
+          ctx.lineCap = "round";
+          ctx.lineJoin = "round";
+          ctx.beginPath();
+          if (accent === "hat") {
+            ctx.moveTo(cx - size * 0.28, ay + size * 0.16);
+            ctx.lineTo(cx, ay - size * 0.08);
+            ctx.lineTo(cx + size * 0.28, ay + size * 0.16);
+          } else if (accent === "bar") {
+            ctx.moveTo(cx - size * 0.30, ay);
+            ctx.lineTo(cx + size * 0.30, ay);
+          } else if (accent === "tilde") {
+            ctx.moveTo(cx - size * 0.32, ay + size * 0.06);
+            ctx.bezierCurveTo(cx - size * 0.14, ay - size * 0.14, cx + size * 0.14, ay + size * 0.22, cx + size * 0.32, ay - size * 0.02);
+          }
+          ctx.stroke();
+        }
+
+        curX += baseW;
+        if (sub) {
+          ctx.font = `600 ${Math.round(size * 0.72)}px Georgia, "Times New Roman", serif`;
+          ctx.fillText(sub, curX, y + size * 0.28);
+        }
+        if (sup) {
+          ctx.font = `600 ${Math.round(size * 0.72)}px Georgia, "Times New Roman", serif`;
+          ctx.fillText(sup, curX, y - size * 0.30);
+        }
+        curX += Math.max(subW, supW);
+
+        if (suffix) {
+          ctx.font = `700 ${Math.round(size * 0.88)}px "JetBrains Mono", monospace`;
+          ctx.fillText(suffix, curX, y + 0.4);
+        }
+        ctx.restore();
+      }
+
+      /* -----------------------------------------------------------------------
+         5. HIGH-DPI ISOMETRIC ENGINE + PIXEL-EXACT OFFSCREEN COLOR-PICKING BUFFER
+         ----------------------------------------------------------------------- */
+      const benchCanvas = document.getElementById("bench-canvas");
+      const bCtx = benchCanvas.getContext("2d");
+
+      const LOGICAL_W = 1200;
+      const LOGICAL_H = 565;
+      const pickCanvas = document.createElement("canvas");
+      pickCanvas.width = LOGICAL_W;
+      pickCanvas.height = LOGICAL_H;
+      const pCtx = pickCanvas.getContext("2d", { willReadFrequently: true });
+
+      const ISO_OX = 592;
+      const ISO_OY = 294;
+      const ISO_S = 13.3;
+      const COS30 = 0.8660254;
+      const SIN30 = 0.5;
+
+      function iso(x, y, z = 0) {
+        return {
+          x: ISO_OX + (x - y) * COS30 * ISO_S,
+          y: ISO_OY + (x + y) * SIN30 * ISO_S - z * ISO_S
+        };
+      }
+
+      const PART_TO_PICK_COLOR = {};
+      PART_ORDER.forEach((id, i) => {
+        const idx = i + 1;
+        PART_TO_PICK_COLOR[id] = `rgb(${idx * 20}, 40, 120)`;
+      });
+
+      function decodePickPixel(r, g, b, a) {
+        if (a < 245) return null;
+        if (Math.abs(g - 40) > 4 || Math.abs(b - 120) > 4) return null;
+        const idx = Math.round(r / 20);
+        if (idx < 1 || idx > PART_ORDER.length) return null;
+        if (Math.abs(r - idx * 20) > 4) return null;
+        return PART_ORDER[idx - 1];
+      }
+
+      function pickPartAtLogical(lx, ly) {
+        const cx = Math.round(lx);
+        const cy = Math.round(ly);
+        if (cx < 0 || cy < 0 || cx >= LOGICAL_W || cy >= LOGICAL_H) return null;
+
+        const R = 4;
+        const x0 = Math.max(0, cx - R);
+        const y0 = Math.max(0, cy - R);
+        const w = Math.min(LOGICAL_W - 1, cx + R) - x0 + 1;
+        const h = Math.min(LOGICAL_H - 1, cy + R) - y0 + 1;
+        const data = pCtx.getImageData(x0, y0, w, h).data;
+
+        const check = (px, py) => {
+          const dx = px - x0, dy = py - y0;
+          if (dx < 0 || dy < 0 || dx >= w || dy >= h) return null;
+          const off = (dy * w + dx) * 4;
+          return decodePickPixel(data[off], data[off + 1], data[off + 2], data[off + 3]);
+        };
+
+        const exact = check(cx, cy);
+        if (exact) return exact;
+
+        for (let rad = 1; rad <= R; rad++) {
+          for (let dy = -rad; dy <= rad; dy++) {
+            for (let dx = -rad; dx <= rad; dx++) {
+              if (Math.abs(dx) !== rad && Math.abs(dy) !== rad) continue;
+              const hit = check(cx + dx, cy + dy);
+              if (hit) return hit;
+            }
+          }
+        }
+        return null;
+      }
+
+      /* Four-Tone Handcrafted Technical Palettes */
+      function getPalette() {
+        if (!state.dark) {
+          return {
+            ink: "#1c1917",
+            inkSoft: "rgba(28, 25, 23, 0.36)",
+            shadow: "rgba(28, 25, 23, 0.14)",
+            guide: "rgba(28, 25, 23, 0.28)",
+            hiGlow: "#d49b35",
+            bench: { top: "#e7e2d7", left: "#cfc9bc", right: "#b3ac9e", hi: "#f5f1e8" },
+            rubber: { top: "#42464c", left: "#2d3136", right: "#1e2024", hi: "#595f66" },
+            steel: { top: "#dedad0", left: "#c4beb1", right: "#a29c8f", hi: "#f0ede6" },
+            chrome: { top: "#f2f1ed", left: "#d2d1cc", right: "#a9a8a2", hi: "#ffffff" },
+            brass: { top: "#eccf8a", left: "#cc9f48", right: "#9c7022", hi: "#f8e7bc" },
+            teal: { top: "#95cfc7", left: "#529f95", right: "#2a7f76", hi: "#c3e8e2" },
+            coral: { top: "#f0ac96", left: "#d46c4e", right: "#a6452a", hi: "#fad0c3" },
+            blue: { top: "#9ec0de", left: "#5d8db8", right: "#3b6d9c", hi: "#c8dff2" },
+            magenta: { top: "#d4a6c9", left: "#a45893", right: "#7a316a", hi: "#e9cde3" },
+            glass: { top: "rgba(220, 240, 248, 0.44)", left: "rgba(170, 210, 228, 0.31)", right: "rgba(130, 180, 204, 0.25)" },
+            dialFace: "#faf8f4",
+            ledOn: "#30c47a"
+          };
+        }
+        return {
+          ink: "#dce6f2",
+          inkSoft: "rgba(220, 230, 242, 0.34)",
+          shadow: "rgba(0, 0, 0, 0.44)",
+          guide: "rgba(220, 230, 242, 0.28)",
+          hiGlow: "#f0c264",
+          bench: { top: "#272d38", left: "#1f242e", right: "#171b23", hi: "#363e4d" },
+          rubber: { top: "#14171d", left: "#0e1015", right: "#080a0d", hi: "#222731" },
+          steel: { top: "#424a59", left: "#323845", right: "#252a34", hi: "#596378" },
+          chrome: { top: "#6f7b91", left: "#515b6e", right: "#3a4252", hi: "#97a5bf" },
+          brass: { top: "#d4a44a", left: "#a67b2a", right: "#7a5819", hi: "#f0cb78" },
+          teal: { top: "#49b3a7", left: "#30857b", right: "#1e5c55", hi: "#78d4c9" },
+          coral: { top: "#e07556", left: "#b35034", right: "#82341e", hi: "#f29d84" },
+          blue: { top: "#6297c9", left: "#43729e", right: "#2c5175", hi: "#8cb9e3" },
+          magenta: { top: "#b56aa5", left: "#8b457c", right: "#632b57", hi: "#d694c8" },
+          glass: { top: "rgba(135, 198, 226, 0.28)", left: "rgba(96, 158, 190, 0.21)", right: "rgba(68, 124, 158, 0.16)" },
+          dialFace: "#1c1f26",
+          ledOn: "#46e08f"
+        };
+      }
+
+      /* Dual-Context Isometric Primitives */
+      function poly(ctx, pts, fill, stroke, lw = 1.05) {
+        ctx.beginPath();
+        ctx.moveTo(pts[0].x, pts[0].y);
+        for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i].x, pts[i].y);
+        ctx.closePath();
+        if (fill) { ctx.fillStyle = fill; ctx.fill(); }
+        if (stroke) {
+          ctx.strokeStyle = stroke;
+          ctx.lineWidth = lw;
+          ctx.lineJoin = "round";
+          ctx.stroke();
+        }
+      }
+
+      function drawShadow(x, y, dx, dy, z, pal) {
+        const off = 0.45;
+        poly(bCtx, [
+          iso(x + off, y + off, z), iso(x + dx + off, y + off, z),
+          iso(x + dx + off, y + dy + off, z), iso(x + off, y + dy + off, z)
+        ], pal.shadow, null);
+      }
+
+      function drawBox(x, y, z, dx, dy, dz, mat, pal, lw = 1.05, bevel = false, partId = null) {
+        const p000 = iso(x, y, z), p100 = iso(x + dx, y, z), p010 = iso(x, y + dy, z), p110 = iso(x + dx, y + dy, z);
+        const p001 = iso(x, y, z + dz), p101 = iso(x + dx, y, z + dz), p011 = iso(x, y + dy, z + dz), p111 = iso(x + dx, y + dy, z + dz);
+
+        poly(bCtx, [p010, p110, p111, p011], mat.left, pal.ink, lw);
+        poly(bCtx, [p100, p110, p111, p101], mat.right, pal.ink, lw);
+        poly(bCtx, [p001, p101, p111, p011], mat.top, pal.ink, lw);
+
+        if (bevel && mat.hi) {
+          bCtx.beginPath();
+          bCtx.moveTo(p001.x, p001.y); bCtx.lineTo(p101.x, p101.y);
+          bCtx.moveTo(p001.x, p001.y); bCtx.lineTo(p011.x, p011.y);
+          bCtx.strokeStyle = mat.hi;
+          bCtx.lineWidth = 1.1;
+          bCtx.stroke();
+        }
+
+        if (partId) {
+          const pc = PART_TO_PICK_COLOR[partId];
+          poly(pCtx, [p010, p110, p111, p011], pc, null);
+          poly(pCtx, [p100, p110, p111, p101], pc, null);
+          poly(pCtx, [p001, p101, p111, p011], pc, null);
+        }
+      }
+
+      /* Engraved tiny brass station plate (01-06) flush on the breadboard */
+      function drawStationPlate(x, y, label, pal) {
+        const w = 1.55, h = 1.15;
+        const p0 = iso(x, y, 0.04), p1 = iso(x + w, y, 0.04), p2 = iso(x + w, y + h, 0.04), p3 = iso(x, y + h, 0.04);
+        poly(bCtx, [p0, p1, p2, p3], pal.brass.top, pal.ink, 0.75);
+        const cx = (p0.x + p2.x) * 0.5, cy = (p0.y + p2.y) * 0.5;
+        bCtx.save();
+        bCtx.font = "700 7.2px 'JetBrains Mono', monospace";
+        bCtx.fillStyle = state.dark ? "#15171c" : "#1c1917";
+        bCtx.textAlign = "center";
+        bCtx.textBaseline = "middle";
+        bCtx.fillText(label, cx, cy + 0.4);
+        bCtx.restore();
+      }
+
+      function drawCylinder(cx, cy, z, r, h, mat, pal, lw = 1.05, knurled = false, partId = null) {
+        const topC = iso(cx, cy, z + h);
+        const botC = iso(cx, cy, z);
+        const rx = r * COS30 * ISO_S * 1.14;
+        const ry = r * SIN30 * ISO_S * 1.14;
+
+        bCtx.beginPath();
+        bCtx.moveTo(topC.x - rx, topC.y);
+        bCtx.lineTo(botC.x - rx, botC.y);
+        bCtx.ellipse(botC.x, botC.y, rx, ry, 0, Math.PI, 0, true);
+        bCtx.lineTo(topC.x + rx, topC.y);
+        bCtx.closePath();
+        bCtx.fillStyle = mat.left;
+        bCtx.fill();
+
+        bCtx.beginPath();
+        bCtx.moveTo(topC.x, topC.y + ry);
+        bCtx.lineTo(botC.x, botC.y + ry);
+        bCtx.ellipse(botC.x, botC.y, rx, ry, 0, Math.PI * 0.5, 0, true);
+        bCtx.lineTo(topC.x + rx, topC.y);
+        bCtx.ellipse(topC.x, topC.y, rx, ry, 0, 0, Math.PI * 0.5, false);
+        bCtx.closePath();
+        bCtx.fillStyle = mat.right;
+        bCtx.fill();
+
+        bCtx.beginPath();
+        bCtx.moveTo(topC.x - rx, topC.y);
+        bCtx.lineTo(botC.x - rx, botC.y);
+        bCtx.ellipse(botC.x, botC.y, rx, ry, 0, Math.PI, 0, true);
+        bCtx.lineTo(topC.x + rx, topC.y);
+        bCtx.strokeStyle = pal.ink;
+        bCtx.lineWidth = lw;
+        bCtx.stroke();
+
+        if (knurled) {
+          bCtx.strokeStyle = pal.inkSoft;
+          bCtx.lineWidth = 0.7;
+          for (let i = -3; i <= 3; i++) {
+            const ang = (i / 4) * (Math.PI * 0.45);
+            const dx = Math.sin(ang) * rx, dy = Math.cos(ang) * ry;
+            bCtx.beginPath();
+            bCtx.moveTo(topC.x + dx, topC.y + dy);
+            bCtx.lineTo(botC.x + dx, botC.y + dy);
+            bCtx.stroke();
+          }
+        }
+
+        bCtx.beginPath();
+        bCtx.ellipse(topC.x, topC.y, rx, ry, 0, 0, Math.PI * 2);
+        bCtx.fillStyle = mat.top;
+        bCtx.fill();
+        bCtx.strokeStyle = pal.ink;
+        bCtx.lineWidth = lw;
+        bCtx.stroke();
+
+        if (partId) {
+          const pc = PART_TO_PICK_COLOR[partId];
+          pCtx.beginPath();
+          pCtx.moveTo(topC.x - rx, topC.y);
+          pCtx.lineTo(botC.x - rx, botC.y);
+          pCtx.ellipse(botC.x, botC.y, rx, ry, 0, Math.PI, 0, true);
+          pCtx.lineTo(topC.x + rx, topC.y);
+          pCtx.ellipse(topC.x, topC.y, rx, ry, 0, 0, Math.PI, true);
+          pCtx.closePath();
+          pCtx.fillStyle = pc;
+          pCtx.fill();
+        }
+      }
+
+      function drawHelicalSpring(cx, cy, z0, z1, r, coils, pal) {
+        const steps = coils * 16;
+        bCtx.beginPath();
+        for (let i = 0; i <= steps; i++) {
+          const t = i / steps;
+          const ang = t * coils * Math.PI * 2;
+          const p = iso(cx + Math.cos(ang) * r, cy + Math.sin(ang) * r, z0 + (z1 - z0) * t);
+          if (i === 0) bCtx.moveTo(p.x, p.y); else bCtx.lineTo(p.x, p.y);
+        }
+        bCtx.strokeStyle = pal.ink;
+        bCtx.lineWidth = 2.6;
+        bCtx.lineCap = "round";
+        bCtx.stroke();
+        bCtx.strokeStyle = pal.chrome.top;
+        bCtx.lineWidth = 1.2;
+        bCtx.stroke();
+      }
+
+      function drawIsoTextureTop(imgCanvas, x, y, z, dx, dy, pal, alpha = 1) {
+        const p0 = iso(x, y, z), px = iso(x + dx, y, z), py = iso(x, y + dy, z);
+        const iw = imgCanvas.width, ih = imgCanvas.height;
+        bCtx.save();
+        bCtx.globalAlpha = alpha;
+        bCtx.transform(
+          (px.x - p0.x) / iw, (px.y - p0.y) / iw,
+          (py.x - p0.x) / ih, (py.y - p0.y) / ih,
+          p0.x, p0.y
+        );
+        bCtx.drawImage(imgCanvas, 0, 0);
+        bCtx.restore();
+        poly(bCtx, [p0, px, iso(x + dx, y + dy, z), py], null, pal.ink, 0.9);
+      }
+
+      function drawGuide(x, y, z0, z1, pal) {
+        if (z1 - z0 < 0.25) return;
+        const a = iso(x, y, z0), b = iso(x, y, z1);
+        bCtx.save();
+        bCtx.setLineDash([3, 3]);
+        bCtx.strokeStyle = pal.guide;
+        bCtx.lineWidth = 1;
+        bCtx.beginPath();
+        bCtx.moveTo(a.x, a.y); bCtx.lineTo(b.x, b.y);
+        bCtx.stroke();
+        bCtx.restore();
+      }
+
+      function drawConduit(pts3D, color, pal, active = true, dashed = false, pulseSpeed = 0.45, pulseOffset = 0, partId = null, highlight = false) {
+        const pts2D = pts3D.map(p => iso(p[0], p[1], p[2]));
+
+        bCtx.save();
+        if (dashed) bCtx.setLineDash([7, 4]);
+        bCtx.lineCap = "round";
+        bCtx.lineJoin = "round";
+
+        if (highlight) {
+          bCtx.beginPath();
+          pts2D.forEach((p, i) => (i === 0 ? bCtx.moveTo(p.x, p.y) : bCtx.lineTo(p.x, p.y)));
+          bCtx.strokeStyle = pal.hiGlow;
+          bCtx.lineWidth = 11.5;
+          bCtx.globalAlpha = 0.5;
+          bCtx.stroke();
+          bCtx.globalAlpha = 1;
+        }
+
+        bCtx.beginPath();
+        pts2D.forEach((p, i) => (i === 0 ? bCtx.moveTo(p.x, p.y) : bCtx.lineTo(p.x, p.y)));
+        bCtx.strokeStyle = pal.ink;
+        bCtx.lineWidth = dashed ? 5.2 : 5.6;
+        bCtx.globalAlpha = active ? 0.9 : 0.3;
+        bCtx.stroke();
+
+        bCtx.strokeStyle = active ? color : pal.steel.left;
+        bCtx.lineWidth = dashed ? 2.8 : 3.2;
+        bCtx.stroke();
+        bCtx.restore();
+
+        if (partId) {
+          pCtx.save();
+          pCtx.beginPath();
+          pts2D.forEach((p, i) => (i === 0 ? pCtx.moveTo(p.x, p.y) : pCtx.lineTo(p.x, p.y)));
+          pCtx.strokeStyle = PART_TO_PICK_COLOR[partId];
+          pCtx.lineWidth = 14;
+          pCtx.lineCap = "round";
+          pCtx.lineJoin = "round";
+          pCtx.stroke();
+          pCtx.restore();
+        }
+
+        if (active) {
+          let totalLen = 0;
+          const segs = [];
+          for (let i = 0; i < pts2D.length - 1; i++) {
+            const len = Math.hypot(pts2D[i + 1].x - pts2D[i].x, pts2D[i + 1].y - pts2D[i].y);
+            segs.push(len);
+            totalLen += len;
+          }
+          for (let k = 0; k < 3; k++) {
+            const t = (state.time * pulseSpeed + k / 3 + pulseOffset) % 1;
+            let dist = t * totalLen;
+            let px = pts2D[0].x, py = pts2D[0].y;
+            for (let i = 0; i < segs.length; i++) {
+              if (dist <= segs[i] || i === segs.length - 1) {
+                const f = segs[i] > 0 ? dist / segs[i] : 0;
+                px = pts2D[i].x + (pts2D[i + 1].x - pts2D[i].x) * f;
+                py = pts2D[i].y + (pts2D[i + 1].y - pts2D[i].y) * f;
+                break;
+              }
+              dist -= segs[i];
+            }
+            bCtx.save();
+            bCtx.beginPath();
+            bCtx.arc(px, py, 3.2, 0, Math.PI * 2);
+            bCtx.fillStyle = "#ffffff";
+            bCtx.shadowColor = color;
+            bCtx.shadowBlur = 7;
+            bCtx.fill();
+            bCtx.strokeStyle = color;
+            bCtx.lineWidth = 1.25;
+            bCtx.stroke();
+            bCtx.restore();
+          }
+        }
+      }
+
+      function drawContourHighlight(x, y, z, dx, dy, pal, isSelected) {
+        const pts = [iso(x, y, z), iso(x + dx, y, z), iso(x + dx, y + dy, z), iso(x, y + dy, z)];
+        bCtx.save();
+        bCtx.shadowColor = pal.hiGlow;
+        bCtx.shadowBlur = isSelected ? 12 : 7;
+        poly(bCtx, pts, isSelected ? "rgba(212, 155, 53, 0.16)" : "rgba(212, 155, 53, 0.10)", pal.hiGlow, isSelected ? 2.6 : 1.9);
+        bCtx.restore();
+      }
+
+      const partAnchors = {};
+      function setAnchor(id, x, y, z) {
+        partAnchors[id] = iso(x, y, z);
+      }
+
+      const chamberParticles = Array.from({ length: 48 }, () => ({
+        lx: Math.random(), ly: Math.random(), lz: Math.random(),
+        vx: (Math.random() - 0.5) * 0.55, vy: (Math.random() - 0.5) * 0.55, vz: (Math.random() - 0.5) * 0.45,
+        ang: Math.random() * Math.PI * 2, sz: 1.5 + Math.random() * 1.7
+      }));
+
+      /* -----------------------------------------------------------------------
+         6. RENDER OPTICAL BENCH (STRICT BACK-TO-FRONT PAINTER'S ORDER)
+         ----------------------------------------------------------------------- */
+      function renderOpticalBench(dt) {
+        const rect = benchCanvas.parentElement.getBoundingClientRect();
+        const dpr = Math.min(window.devicePixelRatio || 1, 2);
+        const targetW = Math.max(1, Math.floor(rect.width * dpr));
+        const targetH = Math.max(1, Math.floor(rect.height * dpr));
+        if (benchCanvas.width !== targetW || benchCanvas.height !== targetH) {
+          benchCanvas.width = targetW;
+          benchCanvas.height = targetH;
+        }
+
+        bCtx.setTransform(1, 0, 0, 1, 0, 0);
+        bCtx.clearRect(0, 0, targetW, targetH);
+
+        const scale = Math.min(targetW / LOGICAL_W, targetH / LOGICAL_H);
+        const ox = (targetW - LOGICAL_W * scale) * 0.5;
+        const oy = (targetH - LOGICAL_H * scale) * 0.5;
+        bCtx.setTransform(scale, 0, 0, scale, ox, oy);
+
+        pCtx.clearRect(0, 0, LOGICAL_W, LOGICAL_H);
+
+        const pal = getPalette();
+        const ex = state.explodeBlend;
+        const inf = state.inferBlend;
+        const sel = state.selectedPart;
+        const hov = state.hoveredPart;
+        const isHi = id => sel === id || hov === id;
+
+        /* A. BEVELED BREADBOARD BASE, RUBBER FEET, M6 GRID, HEX BOLTS & RAILS */
+        [[-21.5, -11.5], [19.5, -11.5], [-21.5, 9.5], [19.5, 9.5]].forEach(([fx, fy]) => {
+          drawCylinder(fx + 1, fy + 1, -2.5, 1.15, 0.9, pal.rubber, pal, 1.0);
+        });
+        drawBox(-23, -12.5, -1.6, 46, 25, 1.6, pal.bench, pal, 1.25, true);
+
+        bCtx.fillStyle = pal.inkSoft;
+        for (let gx = -21; gx <= 21; gx += 3) {
+          for (let gy = -11; gy <= 11; gy += 3) {
+            const p = iso(gx, gy, 0);
+            bCtx.beginPath();
+            bCtx.ellipse(p.x, p.y, 1.35, 0.78, 0, 0, Math.PI * 2);
+            bCtx.fill();
+          }
+        }
+
+        [[-21.6, -11.2], [21.6, -11.2], [-21.6, 11.2], [21.6, 11.2]].forEach(([sx, sy]) => {
+          drawCylinder(sx, sy, 0, 0.62, 0.25, pal.steel, pal, 0.9);
+        });
+
+        drawBox(-21.5, 10.3, 0, 43, 0.72, 0.34, pal.chrome, pal, 0.95);
+        drawBox(-21.5, -11.2, 0, 43, 0.72, 0.34, pal.chrome, pal, 0.95);
+        bCtx.strokeStyle = pal.inkSoft;
+        bCtx.lineWidth = 0.7;
+        for (let tx = -20; tx <= 20; tx += 1) {
+          const a = iso(tx, 10.3, 0.35);
+          const b = iso(tx, tx % 5 === 0 ? 10.95 : 10.7, 0.35);
+          bCtx.beginPath(); bCtx.moveTo(a.x, a.y); bCtx.lineTo(b.x, b.y); bCtx.stroke();
+        }
+
+        // Engraved Brass Station Plates (01-06) flush on breadboard deck
+        drawStationPlate(-20.4, 4.7, "01", pal);
+        drawStationPlate(-10.8, 8.3, "02", pal);
+        drawStationPlate(0.4, -10.0, "03", pal);
+        drawStationPlate(10.5, -10.2, "04", pal);
+        drawStationPlate(7.6, 8.7, "05", pal);
+        drawStationPlate(19.0, 8.9, "06", pal);
+
+        // Engraved Brass Front Nameplate ("CODIR · OPT-BENCH · MICCAI")
+        const np0 = iso(-11.8, 12.5, -0.35), np1 = iso(2.4, 12.5, -0.35), np2 = iso(2.4, 12.5, -1.25), np3 = iso(-11.8, 12.5, -1.25);
+        poly(bCtx, [np0, np1, np2, np3], pal.brass.left, pal.ink, 0.9);
+        bCtx.save();
+        bCtx.translate((np0.x + np2.x) * 0.5, (np0.y + np2.y) * 0.5);
+        bCtx.rotate(Math.atan2(np1.y - np0.y, np1.x - np0.x));
+        bCtx.font = "700 8px 'JetBrains Mono', monospace";
+        bCtx.fillStyle = state.dark ? "#15171c" : "#1c1917";
+        bCtx.textAlign = "center";
+        bCtx.textBaseline = "middle";
+        bCtx.fillText("CODIR \u00B7 OPT-BENCH \u00B7 MICCAI", 0, 0.5);
+        bCtx.restore();
+
+        /* B. PHYSICAL CONDUITS & 05C DUAL-OBJECTIVE LOSS CONDUIT */
+        const trainActive = inf < 0.5;
+        drawConduit([[-14.2, -1.5, 1.0], [-11.5, -1.5, 1.0], [-11.5, -6.5, 1.0], [-8.8, -6.5, 1.0]], "#3b6d9c", pal, trainActive, false, 0.42, 0.0);
+        drawConduit([[-14.2, 2.2, 1.0], [-11.5, 2.2, 1.0], [-11.5, 5.4, 1.0], [-8.8, 5.4, 1.0]], "#8b3a7a", pal, true, false, 0.45, 0.25);
+        drawConduit([[-2.0, -6.5, 1.1], [2.4, -6.5, 1.1]], "#b8862d", pal, trainActive, false, 0.42, 0.4);
+        drawConduit([[8.0, -7.2, 1.2], [12.2, -7.2, 1.2]], "#c85a3a", pal, trainActive, false, 0.50, 0.1);
+        drawConduit([[5.2, -4.0, 0.85], [5.2, 4.2, 0.85], [7.8, 4.2, 0.85]], "#2a7f76", pal, trainActive, false, 0.44, 0.3);
+        drawConduit([[15.8, -2.5, 1.1], [15.8, 1.2, 1.1], [11.8, 1.2, 1.1], [11.8, 2.6, 1.1]], "#c85a3a", pal, trainActive, false, 0.46, 0.6);
+
+        // 05C: Dual-Objective Loss Feedback Conduit
+        const lossPts = [[9.8, 8.4, 0.62], [9.8, 9.65, 0.62], [-5.4, 9.65, 0.62], [-5.4, 8.2, 0.62]];
+        drawConduit(lossPts, "#2a7f76", pal, trainActive, true, 0.38, 0.7, "05C", isHi("05C"));
+        drawBox(-2.8, 9.15, 0.12, 1.2, 1.0, 0.72, pal.coral, pal, 0.9, false, "05C");
+        drawBox(6.0, 9.15, 0.12, 1.2, 1.0, 0.72, pal.coral, pal, 0.9, false, "05C");
+        setAnchor("05C", -2.2, 9.65, 1.05);
+
+        // Inference Direct Bypass Conduit (Student -> 06A Output Stage)
+        if (inf > 0.05) {
+          drawConduit([[-2.2, 5.6, 0.75], [6.5, 5.6, 0.75], [6.5, 7.6, 0.75], [14.5, 7.6, 0.75]], "#2a7f76", pal, true, false, 0.62, 0.15);
+        }
+
+        /* C. 01A (H&E SLIDE TRAY) & 01B (BEAM-SPLITTER PRISM) */
+        {
+          const zL = ex * 2.2;
+          drawShadow(-20.5, -3.2, 6.4, 7.2, 0.02, pal);
+          drawBox(-20.5, -3.2, 0, 6.4, 7.2, 1.1, pal.steel, pal, 1.1, true, "01A");
+          drawCylinder(-21.2, 0.4, 0.25, 0.78, 0.65, pal.brass, pal, 0.95, true, "01A");
+
+          drawGuide(-17.3, 0.4, 1.1, 1.1 + zL, pal);
+          drawBox(-19.8, -2.4, 1.1 + zL, 4.6, 5.6, 0.42, pal.glass, pal, 0.95, false, "01A");
+          drawIsoTextureTop(stageCanvases.he, -19.2, -1.7, 1.54 + zL, 3.4, 4.2, pal, 1.0);
+          drawBox(-19.6, -2.2, 1.52 + zL, 1.1, 0.35, 0.22, pal.brass, pal, 0.85, false, "01A");
+          drawBox(-19.6, 2.6, 1.52 + zL, 1.1, 0.35, 0.22, pal.brass, pal, 0.85, false, "01A");
+
+          if (isHi("01A")) drawContourHighlight(-20.7, -3.4, 0.06, 5.4, 7.6, pal, sel === "01A");
+          setAnchor("01A", -17.6, 0.4, 1.65 + zL);
+
+          bCtx.save();
+          bCtx.globalAlpha = 1 - inf * 0.55;
+          drawBox(-15.0, -2.4, 1.1 + zL * 1.4, 0.98, 2.2, 2.0, pal.blue, pal, 0.95, true, "01B");
+          drawBox(-15.0, 0.8, 1.1 + zL * 1.4, 0.98, 2.2, 2.0, pal.magenta, pal, 0.95, true, "01B");
+          drawBox(-15.05, -0.25, 1.1 + zL * 1.4, 1.08, 1.1, 0.55, pal.brass, pal, 0.85, false, "01B");
+          if (isHi("01B")) drawContourHighlight(-15.2, -2.6, 1.1 + zL * 1.4, 1.4, 5.8, pal, sel === "01B");
+          setAnchor("01B", -14.5, 0.3, 3.15 + zL * 1.4);
+          bCtx.restore();
+        }
+
+        /* D. 02C (PART 1) — EMA TEACHER DECODER TOWER */
+        {
+          const zL = ex * 2.5;
+          bCtx.save();
+          bCtx.globalAlpha = 1 - inf * 0.65;
+
+          drawShadow(-9.0, -9.5, 7.2, 5.6, 0.02, pal);
+          drawBox(-9.0, -9.5, 0, 7.2, 5.6, 1.0, pal.steel, pal, 1.1, true, "02C");
+          drawGuide(-5.4, -6.7, 1.0, 1.0 + zL, pal);
+
+          drawBox(-8.5, -8.9, 1.0 + zL, 3.0, 4.4, 3.2, pal.blue, pal, 1.05, true, "02C");
+          const rz = 4.35 + zL * 1.45;
+          drawBox(-8.4, -8.8, rz, 2.8, 4.2, 0.16, pal.brass, pal, 0.85, false, "02C");
+          bCtx.strokeStyle = pal.ink;
+          bCtx.lineWidth = 0.55;
+          for (let i = 1; i < 4; i++) {
+            const a = iso(-8.4 + i * 0.7, -8.8, rz + 0.18), b = iso(-8.4 + i * 0.7, -4.6, rz + 0.18);
+            bCtx.beginPath(); bCtx.moveTo(a.x, a.y); bCtx.lineTo(b.x, b.y); bCtx.stroke();
+            const c = iso(-8.4, -8.8 + i * 1.05, rz + 0.18), d = iso(-5.6, -8.8 + i * 1.05, rz + 0.18);
+            bCtx.beginPath(); bCtx.moveTo(c.x, c.y); bCtx.lineTo(d.x, d.y); bCtx.stroke();
+          }
+
+          drawBox(-5.0, -8.7, 1.0 + zL * 1.1, 2.7, 4.0, 1.9, pal.steel, pal, 1.0, true, "02C");
+          drawCylinder(-3.65, -6.7, 2.9 + zL * 1.5, 1.1, 0.8, pal.blue, pal, 1.0, false, "02C");
+          drawCylinder(-3.65, -6.7, 3.7 + zL * 1.7, 0.7, 0.45, pal.chrome, pal, 0.9, false, "02C");
+          drawIsoTextureTop(stageCanvases.teacher, -4.8, -8.3, 2.95 + zL * 1.1, 2.3, 3.2, pal, 0.95);
+
+          if (isHi("02C")) drawContourHighlight(-9.2, -9.7, 0.06, 7.6, 6.0, pal, sel === "02C");
+          bCtx.restore();
+        }
+
+        /* E. 03A — ADAPTIVE CONFIDENCE GAUGE & SHUTTER GATE */
+        {
+          const zL = ex * 2.4;
+          bCtx.save();
+          bCtx.globalAlpha = 1 - inf * 0.65;
+
+          drawShadow(2.2, -9.8, 6.0, 5.8, 0.02, pal);
+          drawBox(2.2, -9.8, 0, 6.0, 5.8, 1.1, pal.steel, pal, 1.1, true, "03A");
+          drawGuide(5.2, -6.9, 1.1, 1.1 + zL, pal);
+
+          const tauNorm = (state.tau - 0.60) / 0.25;
+          const slide = tauNorm * 1.3;
+          drawBox(2.7, -9.2, 1.1 + zL, 2.2, 4.6, 1.75, pal.teal, pal, 1.0, true, "03A");
+          drawBox(5.1, -9.2 + slide * 0.55, 1.1 + zL * 1.2, 2.4, 3.3, 1.95, pal.coral, pal, 1.0, true, "03A");
+          drawIsoTextureTop(stageCanvases.gate, 2.9, -8.8, 2.88 + zL, 1.8, 3.8, pal, 0.95);
+
+          const dc = iso(5.8, -7.2, 5.2 + zL * 1.65);
+          drawCylinder(5.8, -7.2, 3.05 + zL * 1.3, 0.45, 0.9, pal.brass, pal, 0.95, false, "03A");
+
+          const dr = 22.5;
+          pCtx.beginPath();
+          pCtx.arc(dc.x, dc.y, dr + 4, 0, Math.PI * 2);
+          pCtx.fillStyle = PART_TO_PICK_COLOR["03A"];
+          pCtx.fill();
+
+          bCtx.beginPath();
+          bCtx.arc(dc.x, dc.y, dr + 3.5, 0, Math.PI * 2);
+          bCtx.fillStyle = pal.brass.left;
+          bCtx.fill();
+          bCtx.strokeStyle = pal.ink;
+          bCtx.lineWidth = 1.15;
+          bCtx.stroke();
+
+          bCtx.beginPath();
+          bCtx.arc(dc.x, dc.y, dr, 0, Math.PI * 2);
+          bCtx.fillStyle = pal.dialFace;
+          bCtx.fill();
+          bCtx.strokeStyle = pal.ink;
+          bCtx.lineWidth = 1.0;
+          bCtx.stroke();
+
+          const startAng = Math.PI * 0.75, sweep = Math.PI * 1.5;
+          for (let i = 0; i <= 10; i++) {
+            const a = startAng + (i / 10) * sweep;
+            const rIn = i % 2 === 0 ? dr - 6 : dr - 3.5;
+            bCtx.beginPath();
+            bCtx.moveTo(dc.x + Math.cos(a) * rIn, dc.y + Math.sin(a) * rIn);
+            bCtx.lineTo(dc.x + Math.cos(a) * (dr - 1.5), dc.y + Math.sin(a) * (dr - 1.5));
+            bCtx.strokeStyle = pal.ink;
+            bCtx.lineWidth = i % 2 === 0 ? 1.2 : 0.7;
+            bCtx.stroke();
+          }
+
+          const a60 = startAng + ((0.60 - 0.50) / 0.50) * sweep;
+          const a75 = startAng + ((0.75 - 0.50) / 0.50) * sweep;
+          bCtx.beginPath();
+          bCtx.arc(dc.x, dc.y, dr - 8.5, a60, a75);
+          bCtx.strokeStyle = pal.teal.left;
+          bCtx.lineWidth = 2.6;
+          bCtx.stroke();
+
+          const needleAng = startAng + ((state.tau - 0.50) / 0.50) * sweep;
+          bCtx.beginPath();
+          bCtx.moveTo(dc.x - Math.cos(needleAng) * 4, dc.y - Math.sin(needleAng) * 4);
+          bCtx.lineTo(dc.x + Math.cos(needleAng) * (dr - 5), dc.y + Math.sin(needleAng) * (dr - 5));
+          bCtx.strokeStyle = "#d94534";
+          bCtx.lineWidth = 2.1;
+          bCtx.lineCap = "round";
+          bCtx.stroke();
+
+          bCtx.beginPath();
+          bCtx.arc(dc.x, dc.y, 3.0, 0, Math.PI * 2);
+          bCtx.fillStyle = pal.brass.top;
+          bCtx.fill();
+          bCtx.strokeStyle = pal.ink;
+          bCtx.lineWidth = 0.9;
+          bCtx.stroke();
+
+          drawMathCanvas(bCtx, dc.x, dc.y + 12.2, {
+            base: "\u03C4",
+            suffix: " " + state.tau.toFixed(2),
+            size: 8.5,
+            color: pal.ink,
+            italic: true
+          });
+
+          if (isHi("03A")) drawContourHighlight(1.9, -10.1, 0.06, 6.6, 6.4, pal, sel === "03A");
+          setAnchor("03A", 5.8, -7.2, 6.9 + zL * 1.65);
+          bCtx.restore();
+        }
+
+        /* F. 04B (DIFFUSION MINI-UNET CHAMBER) & 04A (PARTIAL NOISING VALVE) */
+        {
+          const zL = ex * 2.8;
+          bCtx.save();
+          bCtx.globalAlpha = 1 - inf * 0.65;
+
+          drawShadow(12.2, -10.2, 7.6, 7.6, 0.02, pal);
+          drawBox(12.2, -10.2, 0, 7.6, 7.6, 1.25, pal.steel, pal, 1.15, true, "04B");
+          drawGuide(16.0, -6.4, 1.25, 1.25 + zL, pal);
+
+          const cz = 1.3 + zL * 0.7;
+          drawBox(13.3, -9.0, cz, 1.5, 5.2, 1.4, pal.brass, pal, 0.95, true, "04B");
+          drawBox(15.1, -7.8, cz + 0.15, 1.6, 2.8, 1.05, pal.coral, pal, 0.95, false, "04B");
+          drawBox(17.0, -9.0, cz, 1.5, 5.2, 1.4, pal.brass, pal, 0.95, true, "04B");
+          drawIsoTextureTop(stageCanvases.diff, 14.3, -8.1, cz + 1.42, 3.4, 3.4, pal, 0.92);
+
+          const noiseEnergy = 0.25 + state.alphaN * 1.6 * (1.15 - state.kProgress * 0.72);
+          chamberParticles.forEach(p => {
+            if (!state.paused && trainActive) {
+              p.lx = (p.lx + p.vx * dt * noiseEnergy + 1) % 1;
+              p.ly = (p.ly + p.vy * dt * noiseEnergy + 1) % 1;
+              p.lz = (p.lz + p.vz * dt * noiseEnergy + 1) % 1;
+            }
+            const pull = state.kProgress * 0.52;
+            const ringA = p.ang + state.time * 0.45;
+            const tx = 0.5 + Math.cos(ringA) * 0.26, ty = 0.5 + Math.sin(ringA) * 0.26;
+            const pt = iso(13.2 + (p.lx * (1 - pull) + tx * pull) * 5.6, -9.2 + (p.ly * (1 - pull) + ty * pull) * 5.6, 2.0 + zL * 1.15 + p.lz * 3.1);
+            bCtx.beginPath();
+            bCtx.arc(pt.x, pt.y, p.sz, 0, Math.PI * 2);
+            bCtx.fillStyle = state.kProgress > 0.65 ? "rgba(73, 179, 167, 0.88)" : "rgba(200, 90, 58, 0.88)";
+            bCtx.fill();
+          });
+
+          const gz = 1.25 + zL * 1.2;
+          drawBox(12.8, -9.6, gz, 6.4, 6.4, 4.3, pal.glass, pal, 1.1, false, "04B");
+          [[12.8, -9.6], [19.2, -9.6], [12.8, -3.2], [19.2, -3.2]].forEach(([rx, ry]) => {
+            drawCylinder(rx, ry, gz, 0.22, 4.5, pal.chrome, pal, 0.85, false, "04B");
+          });
+
+          const capZ = 5.55 + zL * 1.7;
+          drawBox(12.6, -9.8, capZ, 6.8, 6.8, 0.42, pal.coral, pal, 1.05, true, "04B");
+          for (let f = 0; f < 4; f++) {
+            drawBox(13.1 + f * 1.5, -9.4, capZ + 0.42, 0.55, 6.0, 0.42, pal.steel, pal, 0.85, false, "04B");
+          }
+
+          if (isHi("04B")) drawContourHighlight(12.0, -10.4, 0.06, 8.0, 8.0, pal, sel === "04B");
+          setAnchor("04B", 16.0, -6.4, capZ + 0.9);
+
+          const vz = zL * 0.45;
+          drawBox(10.4, -5.8, 0, 2.2, 2.4, 0.95, pal.steel, pal, 1.0, true, "04A");
+          drawCylinder(11.5, -4.6, 0.95 + vz, 0.98, 0.85, pal.brass, pal, 1.0, true, "04A");
+          const vc = iso(11.5, -4.6, 1.85 + vz);
+          const vAng = state.alphaN * Math.PI * 4.5;
+          bCtx.beginPath();
+          bCtx.moveTo(vc.x, vc.y);
+          bCtx.lineTo(vc.x + Math.cos(vAng) * 8.5, vc.y + Math.sin(vAng) * 4.8);
+          bCtx.strokeStyle = pal.ink;
+          bCtx.lineWidth = 1.8;
+          bCtx.stroke();
+
+          if (isHi("04A")) drawContourHighlight(10.2, -6.0, 0.06, 2.6, 2.8, pal, sel === "04A");
+          setAnchor("04A", 11.5, -4.6, 2.0 + vz);
+          bCtx.restore();
+        }
+
+        /* G. 02C (EMA FLYWHEEL), 02A (FROZEN UNI ENCODER) & 02B (STUDENT ASPP) */
+        {
+          const zL = ex * 2.5;
+
+          bCtx.save();
+          bCtx.globalAlpha = 1 - inf * 0.65;
+          drawConduit([[-5.6, -3.8, 1.3], [-5.6, 2.6, 1.3]], "#b8862d", pal, trainActive, false, 0.35, 0.2, "02C", false);
+          drawConduit([[-4.8, -3.8, 1.3], [-4.8, 2.6, 1.3]], "#b8862d", pal, trainActive, false, 0.35, 0.7, "02C", false);
+          drawCylinder(-5.2, -0.6, 0.9 + zL * 0.45, 1.9, 0.62, pal.brass, pal, 1.05, true, "02C");
+
+          const fc = iso(-5.2, -0.6, 1.56 + zL * 0.45);
+          for (let s = 0; s < 4; s++) {
+            const a = state.emaAngle + (s * Math.PI) / 2;
+            bCtx.beginPath();
+            bCtx.moveTo(fc.x, fc.y);
+            bCtx.lineTo(fc.x + Math.cos(a) * 19.5, fc.y + Math.sin(a) * 11.2);
+            bCtx.strokeStyle = pal.ink;
+            bCtx.lineWidth = 1.65;
+            bCtx.stroke();
+          }
+          setAnchor("02C", -5.2, -0.6, 1.7 + zL * 0.45);
+          bCtx.restore();
+
+          drawShadow(-9.0, 2.6, 7.2, 5.6, 0.02, pal);
+          drawBox(-9.0, 2.6, 0, 3.6, 5.6, 1.0, pal.steel, pal, 1.1, true, "02A");
+          drawBox(-5.4, 2.6, 0, 3.6, 5.6, 1.0, pal.steel, pal, 1.1, true, "02B");
+          drawGuide(-5.4, 5.4, 1.0, 1.0 + zL, pal);
+
+          drawBox(-8.5, 3.2, 1.0 + zL, 3.0, 4.4, 3.2, pal.blue, pal, 1.05, true, "02A");
+          const rz = 4.35 + zL * 1.45;
+          drawBox(-8.4, 3.3, rz, 2.8, 4.2, 0.16, pal.brass, pal, 0.85, false, "02A");
+          bCtx.strokeStyle = pal.ink;
+          bCtx.lineWidth = 0.55;
+          for (let i = 1; i < 4; i++) {
+            const a = iso(-8.4 + i * 0.7, 3.3, rz + 0.18), b = iso(-8.4 + i * 0.7, 7.5, rz + 0.18);
+            bCtx.beginPath(); bCtx.moveTo(a.x, a.y); bCtx.lineTo(b.x, b.y); bCtx.stroke();
+            const c = iso(-8.4, 3.3 + i * 1.05, rz + 0.18), d = iso(-5.6, 3.3 + i * 1.05, rz + 0.18);
+            bCtx.beginPath(); bCtx.moveTo(c.x, c.y); bCtx.lineTo(d.x, d.y); bCtx.stroke();
+          }
+          if (isHi("02A")) drawContourHighlight(-9.1, 2.5, 0.06, 3.8, 5.8, pal, sel === "02A");
+          setAnchor("02A", -7.0, 5.4, rz + 0.25);
+
+          drawBox(-5.0, 3.4, 1.0 + zL * 1.1, 2.7, 4.0, 2.1, pal.brass, pal, 1.05, true, "02B");
+          drawCylinder(-3.65, 5.4, 3.1 + zL * 1.5, 1.1, 0.85, pal.coral, pal, 1.0, false, "02B");
+          drawCylinder(-3.65, 5.4, 3.95 + zL * 1.7, 0.65, 0.45, pal.chrome, pal, 0.9, false, "02B");
+
+          const ledP = iso(-2.3, 6.8, 2.2 + zL * 1.1);
+          const pulse = 0.65 + Math.sin(state.time * 4.5) * 0.35;
+          bCtx.save();
+          bCtx.beginPath();
+          bCtx.arc(ledP.x, ledP.y, 3.2, 0, Math.PI * 2);
+          bCtx.fillStyle = pal.ledOn;
+          bCtx.shadowColor = pal.ledOn;
+          bCtx.shadowBlur = 9 * pulse;
+          bCtx.fill();
+          bCtx.strokeStyle = pal.ink;
+          bCtx.lineWidth = 0.8;
+          bCtx.stroke();
+          bCtx.restore();
+
+          if (isHi("02B")) drawContourHighlight(-5.3, 2.5, 0.06, 3.6, 5.8, pal, sel === "02B");
+          setAnchor("02B", -3.65, 5.4, 4.48 + zL * 1.7);
+        }
+
+        /* H. 05A (FUSION PRESS), 05B (CONFIDENCE WEIGHTING w) & 06A (OUTPUT STAGE) */
+        {
+          const zL = ex * 2.3;
+
+          bCtx.save();
+          bCtx.globalAlpha = 1 - inf * 0.58;
+          drawShadow(7.6, 2.4, 5.8, 6.0, 0.02, pal);
+          drawBox(7.6, 2.4, 0, 5.8, 6.0, 1.1, pal.steel, pal, 1.1, true, "05A");
+          drawBox(8.2, 3.0, 1.1 + zL * 0.5, 2.1, 4.8, 0.45, pal.teal, pal, 0.9, false, "05A");
+          drawBox(10.6, 3.0, 1.1 + zL * 0.5, 2.1, 4.8, 0.45, pal.coral, pal, 0.9, false, "05A");
+
+          const pressBob = trainActive ? Math.sin(state.time * 2.4) * 0.28 : 0;
+          const headZ = 3.55 + pressBob + zL * 1.45;
+          drawCylinder(8.4, 3.2, 1.1, 0.28, 3.9 + zL * 1.3, pal.chrome, pal, 0.85, false, "05A");
+          drawCylinder(12.6, 7.6, 1.1, 0.28, 3.9 + zL * 1.3, pal.chrome, pal, 0.85, false, "05A");
+          drawHelicalSpring(8.4, 3.2, 1.55 + zL * 0.4, headZ, 0.52, 5, pal);
+          drawHelicalSpring(12.6, 7.6, 1.55 + zL * 0.4, headZ, 0.52, 5, pal);
+
+          drawBox(8.1, 2.9, headZ, 4.8, 5.0, 0.85, pal.glass, pal, 1.05, false, "05A");
+          drawCylinder(10.5, 5.4, headZ + 0.85, 1.05, 0.6, pal.brass, pal, 1.0, true, "05A");
+
+          if (isHi("05A")) drawContourHighlight(7.4, 2.2, 0.06, 6.2, 6.4, pal, sel === "05A");
+          setAnchor("05A", 10.5, 5.4, headZ + 1.5);
+
+          const wz = zL * 0.45;
+          drawShadow(0.6, 7.9, 4.2, 2.6, 0.02, pal);
+          drawBox(0.6, 7.9, 0, 4.2, 2.6, 1.15, pal.brass, pal, 1.05, true, "05B");
+          drawBox(1.0, 8.25, 1.15 + wz, 3.4, 1.9, 0.35, pal.chrome, pal, 0.9, false, "05B");
+          drawCylinder(1.85, 9.2, 1.5 + wz, 0.52, 0.28, pal.teal, pal, 0.85, false, "05B");
+          drawCylinder(3.45, 9.2, 1.5 + wz, 0.52, 0.28, pal.coral, pal, 0.85, false, "05B");
+
+          if (isHi("05B")) drawContourHighlight(0.4, 7.7, 0.06, 4.6, 3.0, pal, sel === "05B");
+          setAnchor("05B", 2.7, 9.2, 1.85 + wz);
+          bCtx.restore();
+
+          // 06A: Illuminated Output Inspection Stage (ALWAYS ACTIVE)
+          drawShadow(14.4, 2.4, 6.2, 6.2, 0.02, pal);
+          drawBox(14.4, 2.4, 0, 6.2, 6.2, 1.25, pal.steel, pal, 1.15, true, "06A");
+          drawGuide(17.5, 5.5, 1.25, 1.25 + zL, pal);
+          drawBox(14.9, 2.9, 1.25 + zL, 5.2, 5.2, 0.45, pal.teal, pal, 1.0, true, "06A");
+
+          drawIsoTextureTop(stageCanvases.outputPure, 15.4, 3.4, 1.72 + zL, 4.2, 4.2, pal, 1.0);
+
+          if (inf > 0.2) {
+            bCtx.save();
+            bCtx.globalAlpha = inf * 0.85;
+            bCtx.strokeStyle = pal.brass.top;
+            bCtx.lineWidth = 1.25;
+            const m1 = iso(17.5, 3.4, 1.76 + zL), m2 = iso(17.5, 7.6, 1.76 + zL);
+            const m3 = iso(15.4, 5.5, 1.76 + zL), m4 = iso(19.6, 5.5, 1.76 + zL);
+            bCtx.beginPath();
+            bCtx.moveTo(m1.x, m1.y); bCtx.lineTo(m2.x, m2.y);
+            bCtx.moveTo(m3.x, m3.y); bCtx.lineTo(m4.x, m4.y);
+            bCtx.stroke();
+            bCtx.restore();
+          }
+
+          drawCylinder(19.6, 7.6, 1.7 + zL * 1.35, 0.78, 1.15, pal.brass, pal, 0.95, true, "06A");
+
+          if (isHi("06A")) drawContourHighlight(14.2, 2.2, 0.06, 6.6, 6.6, pal, sel === "06A");
+          setAnchor("06A", 17.5, 5.5, 1.9 + zL);
+        }
+
+        updateSvgOverlay(pal, rect, scale / dpr, ox / dpr, oy / dpr);
+      }
+
+      /* -----------------------------------------------------------------------
+         7. SVG OVERLAY ENGINE (2-SEGMENT LEADER LINE & NUMBERED PINS 01-12)
+         ----------------------------------------------------------------------- */
+      const overlaySvg = document.getElementById("overlay-svg");
+      const calloutCardEl = document.getElementById("callout-card");
+      const isoStageEl = document.getElementById("iso-stage");
+      const hoverPillEl = document.getElementById("hover-pill");
+
+      function positionCalloutCard(partId) {
+        if (!partId || !partAnchors[partId]) return;
+        const rect = isoStageEl.getBoundingClientRect();
+        if (rect.width < 700) {
+          calloutCardEl.style.left = "";
+          calloutCardEl.style.top = "";
+          return;
+        }
+
+        const scale = Math.min(rect.width / LOGICAL_W, rect.height / LOGICAL_H);
+        const ox = (rect.width - LOGICAL_W * scale) * 0.5;
+        const oy = (rect.height - LOGICAL_H * scale) * 0.5;
+
+        const anc = partAnchors[partId];
+        const px = anc.x * scale + ox;
+        const py = anc.y * scale + oy;
+
+        const cw = calloutCardEl.offsetWidth || 376;
+        const ch = calloutCardEl.offsetHeight || 285;
+
+        const left = px < rect.width * 0.5
+          ? Math.min(rect.width - cw - 14, Math.max(px + 72, rect.width - cw - 18))
+          : Math.max(14, Math.min(px - cw - 72, 18));
+        const top = Math.max(12, Math.min(rect.height - ch - 12, py - ch * 0.45));
+
+        calloutCardEl.style.left = `${Math.round(left)}px`;
+        calloutCardEl.style.top = `${Math.round(top)}px`;
+      }
+
+      function updateSvgOverlay(pal, rect, scaleCss, oxCss, oyCss) {
+        let html = "";
+
+        if (state.showPins) {
+          PART_ORDER.forEach(id => {
+            const anc = partAnchors[id];
+            if (!anc) return;
+            const p = PARTS[id];
+            const isSel = state.selectedPart === id;
+            const isHov = state.hoveredPart === id;
+            const isBypass = state.mode === "infer" && p.bypassInInfer;
+            const bg = isSel ? pal.hiGlow : (isHov ? pal.teal.left : (state.dark ? "#1c1f26" : "#faf8f4"));
+            const fg = (isSel || isHov) ? "#1c1917" : pal.ink;
+            const op = isBypass && !isSel ? 0.48 : 1;
+
+            html += `<g class="svg-pin-group" data-pin-part="${id}" opacity="${op}">
+              <circle class="pin-bg" cx="${anc.x.toFixed(1)}" cy="${anc.y.toFixed(1)}" r="${isSel ? 12.5 : 10.5}"
+                fill="${bg}" stroke="${pal.ink}" stroke-width="${isSel ? 2 : 1.4}" />
+              <text x="${anc.x.toFixed(1)}" y="${(anc.y + 3.4).toFixed(1)}" text-anchor="middle"
+                font-family="JetBrains Mono, monospace" font-size="9.2" font-weight="700" fill="${fg}">${p.pin}</text>
+            </g>`;
+          });
+        }
+
+        if (state.selectedPart && partAnchors[state.selectedPart]) {
+          const anc = partAnchors[state.selectedPart];
+          const pulseR = 10.5 + Math.sin(state.time * 5.2) * 2.2;
+
+          if (rect.width >= 700 && calloutCardEl.classList.contains("open")) {
+            const cardLeft = parseFloat(calloutCardEl.style.left) || 16;
+            const cardTop = parseFloat(calloutCardEl.style.top) || 16;
+            const cw = calloutCardEl.offsetWidth || 376;
+            const ch = calloutCardEl.offsetHeight || 285;
+
+            const ancCssX = anc.x * scaleCss + oxCss;
+            const cardCenterX = cardLeft + cw * 0.5;
+            const targetCssX = cardCenterX > ancCssX ? cardLeft : cardLeft + cw;
+            const targetCssY = Math.max(cardTop + 26, Math.min(cardTop + ch - 26, anc.y * scaleCss + oyCss));
+
+            const tx = (targetCssX - oxCss) / scaleCss;
+            const ty = (targetCssY - oyCss) / scaleCss;
+            const dir = tx > anc.x ? 1 : -1;
+            const elbowX = anc.x + dir * Math.min(38, Math.abs(tx - anc.x) * 0.42);
+
+            html += `
+              <polyline points="${anc.x.toFixed(1)},${anc.y.toFixed(1)} ${elbowX.toFixed(1)},${ty.toFixed(1)} ${tx.toFixed(1)},${ty.toFixed(1)}"
+                fill="none" stroke="${pal.hiGlow}" stroke-width="3.6" stroke-opacity="0.32" stroke-linejoin="round" />
+              <polyline points="${anc.x.toFixed(1)},${anc.y.toFixed(1)} ${elbowX.toFixed(1)},${ty.toFixed(1)} ${tx.toFixed(1)},${ty.toFixed(1)}"
+                fill="none" stroke="${pal.ink}" stroke-width="1.65" stroke-linejoin="round" />
+              <circle cx="${tx.toFixed(1)}" cy="${ty.toFixed(1)}" r="3.4" fill="${pal.hiGlow}" stroke="${pal.ink}" stroke-width="1.1" />
+            `;
+          }
+
+          if (!state.showPins) {
+            html += `
+              <circle cx="${anc.x.toFixed(1)}" cy="${anc.y.toFixed(1)}" r="${pulseR.toFixed(1)}"
+                fill="none" stroke="${pal.hiGlow}" stroke-width="1.7" stroke-opacity="0.85" />
+              <circle cx="${anc.x.toFixed(1)}" cy="${anc.y.toFixed(1)}" r="4.8"
+                fill="${pal.hiGlow}" stroke="${pal.ink}" stroke-width="1.3" />
+            `;
+          }
+        }
+
+        overlaySvg.innerHTML = html;
+      }
+
+      overlaySvg.addEventListener("click", evt => {
+        const g = evt.target.closest("[data-pin-part]");
+        if (g) {
+          evt.stopPropagation();
+          selectPart(g.dataset.pinPart);
+        }
+      });
+
+      /* -----------------------------------------------------------------------
+         8. MOUSE / TOUCH PICKING & INTERACTIVE CALLOUT CONTROLLER
+         ----------------------------------------------------------------------- */
+      function getCanvasPoint(evt) {
+        const rect = benchCanvas.getBoundingClientRect();
+        const scale = Math.min(rect.width / LOGICAL_W, rect.height / LOGICAL_H);
+        const ox = (rect.width - LOGICAL_W * scale) * 0.5;
+        const oy = (rect.height - LOGICAL_H * scale) * 0.5;
+        return {
+          lx: (evt.clientX - rect.left - ox) / scale,
+          ly: (evt.clientY - rect.top - oy) / scale,
+          cssX: evt.clientX - rect.left,
+          cssY: evt.clientY - rect.top
+        };
+      }
+
+      benchCanvas.addEventListener("mousemove", evt => {
+        const pt = getCanvasPoint(evt);
+        const hit = pickPartAtLogical(pt.lx, pt.ly);
+        if (hit !== state.hoveredPart) {
+          state.hoveredPart = hit;
+          benchCanvas.style.cursor = hit ? "pointer" : "default";
+        }
+
+        if (hit && hit !== state.selectedPart) {
+          const p = PARTS[hit];
+          hoverPillEl.innerHTML = `<span class="hp-code">[${p.id}]</span><span>${p.title}</span><span class="hp-cta">&middot; Click to inspect</span>`;
+          const stageW = isoStageEl.clientWidth;
+          const pillW = hoverPillEl.offsetWidth || 260;
+          const tx = Math.min(stageW - pillW - 10, Math.max(10, pt.cssX + 14));
+          const ty = Math.max(10, pt.cssY - 36);
+          hoverPillEl.style.left = `${tx}px`;
+          hoverPillEl.style.top = `${ty}px`;
+          hoverPillEl.classList.add("visible");
+        } else {
+          hoverPillEl.classList.remove("visible");
+        }
+      });
+
+      benchCanvas.addEventListener("mouseleave", () => {
+        state.hoveredPart = null;
+        benchCanvas.style.cursor = "default";
+        hoverPillEl.classList.remove("visible");
+      });
+
+      benchCanvas.addEventListener("click", evt => {
+        const pt = getCanvasPoint(evt);
+        const hit = pickPartAtLogical(pt.lx, pt.ly);
+        if (hit) selectPart(hit);
+        else closeCallout();
+      });
+
+      function refreshCalloutLive() {
+        const id = state.selectedPart;
+        if (!id || !PARTS[id]) return;
+        const p = PARTS[id];
+        document.getElementById("cc-live-val").innerHTML = p.telemetry();
+
+        const isBypassed = state.mode === "infer" && p.bypassInInfer;
+        const statusEl = document.getElementById("cc-status");
+        statusEl.innerHTML = isBypassed ? "BYPASSED &middot; INFERENCE" : p.status;
+        statusEl.className = `cc-status ${isBypassed ? "bypassed" : p.statusClass}`;
+
+        const bypassBox = document.getElementById("cc-bypass-box");
+        if (isBypassed) {
+          bypassBox.innerHTML = `<strong>Inference Only Mode:</strong> ${p.bypassReason}`;
+          bypassBox.classList.add("show");
+        } else {
+          bypassBox.classList.remove("show");
+        }
+      }
+
+      function syncChipStyles() {
+        document.querySelectorAll(".part-chip").forEach(ch => {
+          const id = ch.dataset.part;
+          const p = PARTS[id];
+          ch.classList.toggle("active", state.selectedPart === id);
+          ch.classList.toggle("bypassed", state.mode === "infer" && p.bypassInInfer);
+        });
+        document.querySelectorAll(".film-cell").forEach(cell => {
+          cell.classList.toggle("active", cell.dataset.jumpPart === state.selectedPart);
+        });
+      }
+
+      function selectPart(partId) {
+        const p = PARTS[partId];
+        if (!p) return;
+        state.selectedPart = partId;
+        hoverPillEl.classList.remove("visible");
+
+        const idx = PART_ORDER.indexOf(partId) + 1;
+        document.getElementById("cc-code").textContent = p.id;
+        document.getElementById("cc-title").textContent = p.title;
+        document.getElementById("cc-sub").innerHTML = p.sub;
+        document.getElementById("cc-in").innerHTML = p.input;
+        document.getElementById("cc-op").innerHTML = p.op;
+        document.getElementById("cc-out").innerHTML = p.output;
+        document.getElementById("cc-eq").innerHTML = p.eq;
+        document.getElementById("cc-counter").textContent = `${idx} / ${PART_ORDER.length}`;
+
+        refreshCalloutLive();
+        syncChipStyles();
+
+        calloutCardEl.classList.add("open");
+        document.getElementById("btn-tour").classList.add("active");
+        requestAnimationFrame(() => positionCalloutCard(partId));
+      }
+
+      function closeCallout() {
+        state.selectedPart = null;
+        calloutCardEl.classList.remove("open");
+        document.getElementById("btn-tour").classList.remove("active");
+        syncChipStyles();
+      }
+
+      function stepPart(delta) {
+        const cur = state.selectedPart || "01A";
+        const idx = PART_ORDER.indexOf(cur);
+        const next = state.selectedPart ? (idx + delta + PART_ORDER.length) % PART_ORDER.length : 0;
+        selectPart(PART_ORDER[next]);
+      }
+
+      document.getElementById("cc-close").addEventListener("click", closeCallout);
+      document.getElementById("cc-prev").addEventListener("click", () => stepPart(-1));
+      document.getElementById("cc-next").addEventListener("click", () => stepPart(1));
+
+      document.getElementById("btn-tour").addEventListener("click", () => {
+        if (state.selectedPart) closeCallout();
+        else selectPart("01A");
+      });
+
+      document.getElementById("btn-pins").addEventListener("click", () => {
+        state.showPins = !state.showPins;
+        document.getElementById("btn-pins").classList.toggle("brass-active", state.showPins);
+      });
+
+      document.querySelectorAll(".film-cell").forEach(cell => {
+        cell.addEventListener("click", e => {
+          if (e.target.tagName === "INPUT" || e.target.tagName === "BUTTON") return;
+          selectPart(cell.dataset.jumpPart);
+        });
+      });
+
+      /* -----------------------------------------------------------------------
+         9. CONTROLS, MODE SWITCH & KEYBOARD SHORTCUTS
+         ----------------------------------------------------------------------- */
+      function setMode(mode) {
+        state.mode = mode;
+        document.getElementById("mode-train").classList.toggle("active", mode === "train");
+        document.getElementById("mode-infer").classList.toggle("active", mode === "infer");
+        updateHistopathologyStages();
+        syncChipStyles();
+      }
+      document.getElementById("mode-train").addEventListener("click", () => setMode("train"));
+      document.getElementById("mode-infer").addEventListener("click", () => setMode("infer"));
+
+      function toggleExplode() {
+        state.exploded = !state.exploded;
+        document.getElementById("btn-explode").classList.toggle("active", state.exploded);
+      }
+      function togglePause() {
+        state.paused = !state.paused;
+        const btn = document.getElementById("btn-pause");
+        btn.innerHTML = state.paused ? "&#9654; Resume [Space]" : "&#10074;&#10074; Pause [Space]";
+        btn.classList.toggle("active", state.paused);
+      }
+      function toggleTheme() {
+        state.dark = !state.dark;
+        document.documentElement.setAttribute("data-theme", state.dark ? "dark" : "light");
+        document.getElementById("btn-theme").classList.toggle("active", state.dark);
+      }
+
+      document.getElementById("btn-explode").addEventListener("click", toggleExplode);
+      document.getElementById("btn-pause").addEventListener("click", togglePause);
+      document.getElementById("btn-theme").addEventListener("click", toggleTheme);
+
+      document.querySelectorAll(".ds-btn").forEach(btn => {
+        btn.addEventListener("click", () => {
+          state.split = btn.dataset.split;
+          document.querySelectorAll(".ds-btn").forEach(b => b.classList.toggle("active", b === btn));
+          document.getElementById("ctrl-ds-val").textContent = btn.textContent;
+          updateHistopathologyStages();
+        });
+      });
+
+      document.getElementById("chk-patchgrid").addEventListener("change", e => {
+        state.showPatchGrid = e.target.checked;
+        updateHistopathologyStages();
+      });
+
+      document.getElementById("slider-tau").addEventListener("input", e => {
+        state.tau = parseFloat(e.target.value);
+        document.getElementById("ctrl-tau-val").textContent = state.tau.toFixed(2);
+        updateHistopathologyStages();
+      });
+
+      document.getElementById("slider-alpha").addEventListener("input", e => {
+        state.alphaN = parseFloat(e.target.value);
+        document.getElementById("ctrl-alpha-val").textContent = state.alphaN.toFixed(2);
+        const kTotal = Math.max(5, Math.round(state.alphaN * 100));
+        document.getElementById("ctrl-k-val").textContent =
+          `${Math.round(state.kProgress * 100)}% (${Math.round(state.kProgress * kTotal)}/${kTotal})`;
+
+        const note = document.getElementById("ctrl-alpha-note");
+        if (state.alphaN < 0.10) {
+          note.innerHTML = `Low noise (${M.wrap("&alpha;<sub>n</sub> &lt; 0.10")}): insufficient to erase Teacher pseudo-label errors (mDice drops to ~87.07%).`;
+        } else if (state.alphaN >= 0.40) {
+          note.innerHTML = `High noise (${M.wrap("&alpha;<sub>n</sub> &ge; 0.40")}): overly perturbs valid gland structure, slightly degrading boundary fidelity.`;
+        } else {
+          note.innerHTML = `${M.wrap("<i>T</i> = 100")} steps. ${M.wrap("&alpha;<sub>n</sub> = 0.20")} is optimal (Table 5): erases pseudo-label errors while preserving gland topology.`;
+        }
+        updateHistopathologyStages();
+      });
+
+      const sliderK = document.getElementById("slider-k");
+      sliderK.addEventListener("input", e => {
+        state.replayingK = false;
+        state.autoCycleK = false;
+        document.getElementById("chk-autocycle").checked = false;
+        state.kProgress = parseFloat(e.target.value) / 100;
+        const kTotal = Math.max(5, Math.round(state.alphaN * 100));
+        document.getElementById("ctrl-k-val").textContent =
+          `${Math.round(state.kProgress * 100)}% (${Math.round(state.kProgress * kTotal)}/${kTotal})`;
+        updateHistopathologyStages();
+      });
+
+      document.getElementById("chk-autocycle").addEventListener("change", e => {
+        state.autoCycleK = e.target.checked;
+      });
+
+      document.getElementById("btn-replay-k").addEventListener("click", () => {
+        state.kProgress = 0;
+        state.replayingK = true;
+        sliderK.value = "0";
+        updateHistopathologyStages();
+      });
+
+      const sliderCmp = document.getElementById("slider-compare");
+      sliderCmp.addEventListener("input", e => {
+        const v = parseFloat(e.target.value);
+        state.compareSplit = v / 100;
+        document.getElementById("vp5-line").style.left = `${v}%`;
+        updateHistopathologyStages();
+      });
+
+      document.querySelectorAll(".vp5-tab").forEach(btn => {
+        btn.addEventListener("click", () => {
+          state.vp5Mode = btn.dataset.vp5;
+          document.querySelectorAll(".vp5-tab").forEach(b => b.classList.toggle("active", b === btn));
+          const isW = state.vp5Mode === "weight";
+          document.getElementById("vp5-line").style.display = isW ? "none" : "block";
+          sliderCmp.style.display = isW ? "none" : "block";
+          document.getElementById("vp5-left-lbl").innerHTML = isW ? `Weight ${M.wrap("<i>w</i>")}` : `CoDiR ${sym.yR}`;
+          document.getElementById("vp5-right-lbl").style.display = isW ? "none" : "block";
+          document.getElementById("vp5-right-lbl").innerHTML = state.vp5Mode === "gt" ? "Ground Truth" : `Teacher ${sym.yHat}`;
+          updateHistopathologyStages();
+        });
+      });
+
+      document.querySelectorAll(".ref-tab").forEach(btn => {
+        btn.addEventListener("click", () => {
+          document.querySelectorAll(".ref-tab").forEach(b => b.classList.toggle("active", b === btn));
+          document.querySelectorAll(".ref-panel").forEach(p => p.classList.remove("active"));
+          document.getElementById(`ref-${btn.dataset.ref}`).classList.add("active");
+        });
+      });
+
+      window.addEventListener("keydown", e => {
+        if (e.target.tagName === "INPUT") return;
+        if (e.code === "Escape") closeCallout();
+        else if (e.code === "Space") { e.preventDefault(); togglePause(); }
+        else if (e.key === "e" || e.key === "E") { e.preventDefault(); toggleExplode(); }
+        else if (e.code === "ArrowRight") { e.preventDefault(); stepPart(1); }
+        else if (e.code === "ArrowLeft") { e.preventDefault(); stepPart(-1); }
+      });
+
+      window.addEventListener("resize", () => {
+        if (state.selectedPart) positionCalloutCard(state.selectedPart);
+      });
+
+      /* -----------------------------------------------------------------------
+         10. 60FPS ANIMATION LOOP
+         ----------------------------------------------------------------------- */
+      let lastTs = 0;
+      function loop(ts) {
+        if (!lastTs) lastTs = ts;
+        const dt = Math.min(0.05, (ts - lastTs) / 1000);
+        lastTs = ts;
+
+        state.explodeBlend += ((state.exploded ? 1 : 0) - state.explodeBlend) * Math.min(1, dt * 8.0);
+        state.inferBlend += ((state.mode === "infer" ? 1 : 0) - state.inferBlend) * Math.min(1, dt * 6.5);
+
+        if (!state.paused) {
+          state.time += dt;
+          if (state.mode === "train") state.emaAngle += dt * 0.85;
+        }
+
+        if (state.replayingK || (state.autoCycleK && !state.paused)) {
+          state.kProgress += dt * 0.36;
+          if (state.kProgress >= 1) {
+            if (state.autoCycleK) state.kProgress = 0;
+            else { state.kProgress = 1; state.replayingK = false; }
+          }
+          sliderK.value = String(Math.round(state.kProgress * 100));
+          const kTotal = Math.max(5, Math.round(state.alphaN * 100));
+          document.getElementById("ctrl-k-val").textContent =
+            `${Math.round(state.kProgress * 100)}% (${Math.round(state.kProgress * kTotal)}/${kTotal})`;
+          updateHistopathologyStages();
+        }
+
+        renderOpticalBench(dt);
+        requestAnimationFrame(loop);
+      }
+
+      window.onload = function () {
+        if (state.paused) {
+          const btn = document.getElementById("btn-pause");
+          btn.innerHTML = "&#9654; Resume [Space]";
+          btn.classList.add("active");
+        }
+        updateHistopathologyStages();
+        syncChipStyles();
+        renderOpticalBench(0);
+        requestAnimationFrame(loop);
+      };
+    })();
+  </script>
+</body>
+</html>

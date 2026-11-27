@@ -4,7 +4,7 @@ title: "CoDiR: Confidence-Guided Diffusion Refinement for Semi-Supervised Histop
 type: software
 license: MIT
 repository-code: "https://github.com/vongla345/codir"
-url: "https://vongla345.github.io/codir/"
+url: "https://nguyenbui1105.github.io/codir/"
 authors:
   - given-names: Hoai Nhan
     family-names: Pham

@@ -10,8 +10,9 @@
 **MICCAI 2026**
 
 [![Paper](https://img.shields.io/badge/Paper-PDF-b8862d)](static/paper/CoDiR.pdf)
-[![Project Page](https://img.shields.io/badge/Project-Page-2a7f76)](https://vongla345.github.io/codir/)
-[![Interactive Demo](https://img.shields.io/badge/Interactive-Demo-3b6d9c)](https://vongla345.github.io/codir/interactive.html)
+[![Code](https://img.shields.io/badge/Code-GitHub-1c1917)](https://github.com/vongla345/codir)
+[![Project Page](https://img.shields.io/badge/Project-Page-2a7f76)](https://nguyenbui1105.github.io/codir/)
+[![Interactive Demo](https://img.shields.io/badge/Interactive-Demo-3b6d9c)](https://nguyenbui1105.github.io/codir/interactive.html)
 [![License: MIT](https://img.shields.io/badge/License-MIT-lightgrey)](LICENSE)
 <!-- TODO: add arXiv / DOI badge once available -->
 
@@ -150,11 +151,11 @@ Gains are largest on CRAG (+1.26 mDice / +2.94 mJaccard at 10%), whose larger, l
 
 ## Code
 
-> 🚧 Training and evaluation code will be released in this repository. <!-- TODO: replace once code is public -->
+This repository hosts the paper's project page. The official PyTorch implementation (training, evaluation and inference on GlaS & CRAG) is at **[github.com/vongla345/codir](https://github.com/vongla345/codir)**.
 
 ## Interactive explainer
 
-[`interactive.html`](interactive.html) is a 12-part interactive "optical bench" of the CoDiR pipeline. You can drag `τ`, `αₙ` and `K` and watch the pseudo-label change from the teacher output to the final refined mask. Open it locally in a browser or on the [project page](https://vongla345.github.io/codir/interactive.html).
+[`interactive.html`](interactive.html) is a 12-part interactive "optical bench" of the CoDiR pipeline. You can drag `τ`, `αₙ` and `K` and watch the pseudo-label change from the teacher output to the final refined mask. Open it locally in a browser or on the [project page](https://nguyenbui1105.github.io/codir/interactive.html).
 
 ## Repository layout
 
